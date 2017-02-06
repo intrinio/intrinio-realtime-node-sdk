@@ -1,4 +1,4 @@
-# Intrinio SDK for Real-Time Stock Prices
+# Intrinio NodeJS SDK for Real-Time Stock Prices
 
 [Intrinio](https://intrinio.com/) provides real-time stock prices from the [IEX stock exchange](https://iextrading.com/), via a two-way WebSocket connection. To get started, [subscribe here](https://intrinio.com/data/realtime-stock-prices) and follow the instructions below.
 
@@ -43,7 +43,7 @@ To receive price quotes from the Intrinio Real-Time API, you need to instruct th
 * The security lobby (`$lobby`) where all price quotes for all securities are posted
 * The security last price lobby (`$lobby_last_price`) where only last price quotes for all securities are posted
 
-Special access is required for both lobby channeles. Contact us for more information.
+Special access is required for both lobby channeles. [Contact us](mailto:sales@intrinio.com) for more information.
 
 ## API Keys
 You will receive your Intrinio API Username and Password after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
