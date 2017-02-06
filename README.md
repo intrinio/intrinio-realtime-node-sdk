@@ -1,6 +1,6 @@
 # Intrinio SDK for Real-Time Stock Prices
 
-[Intrinio](https://intrinio.com/) provides real-time stock prices from the IEX stock exchange, via a two-way WebSocket connection. To get started, [subscribe here](https://intrinio.com/data/realtime-stock-prices) and follow the instructions below.
+[Intrinio](https://intrinio.com/) provides real-time stock prices from the [IEX stock exchange](https://iextrading.com/), via a two-way WebSocket connection. To get started, [subscribe here](https://intrinio.com/data/realtime-stock-prices) and follow the instructions below.
 
 ## Features
 
