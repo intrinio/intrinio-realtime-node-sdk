@@ -54,47 +54,57 @@ You will receive your Intrinio API Username and Password after [creating an acco
 
 `constructor(options)` - Creates a new instance of the IntrinioRealtime client.
 * **Parameter** `options`: An object with a `username` and `password` property corresponding to your Intrinio API Username and Password.
-* **Example:**
-  ```javascript
-  var ir = new IntrinioRealtime({
-    username: "INTRINIO_API_USERNAME",
-    password: "INTRINIO_API_PASSWORD",
-  })
-  ```
+```javascript
+var ir = new IntrinioRealtime({
+  username: "INTRINIO_API_USERNAME",
+  password: "INTRINIO_API_PASSWORD",
+})
+```
+
+---------
 
 `destroy()` - Closes the WebSocket, stops the self-healing and heartbeat intervals. You MUST call this to dispose of the client.
+
+---------
 
 `onError(callback)` - Invokes the given callback when a fatal error is encountered. If no callback has been registered, the error will be thrown.
 * **Parameter** `callback` - The callback to invoke. The error will be passed as an argument to the callback.
 
+---------
+
 `onQuote(callback)` - Invokes the given callback when a quote has been received.
 * **Parameter** `callback` - The callback to invoke. The quote will be passed as an argument to the callback.
-* **Example:**
-  ```javascript
-  ir.onQuote(quote => {
-    var { ticker, type, price, size, timestamp } = quote
-    console.log("QUOTE: ", ticker, type, price, size, timestamp)
-  })
-  ```
+```javascript
+ir.onQuote(quote => {
+  var { ticker, type, price, size, timestamp } = quote
+  console.log("QUOTE: ", ticker, type, price, size, timestamp)
+})
+```
+
+---------
 
 `join(...channels)` - Joins the given channels. This can be called at any time. The client will automatically register joined channels and establish the proper subscriptions with the WebSocket connection.
 * **Parameter** `channels` - An argument list or array of channels to join. See Channels section above for more details.
-* **Example:**
-  ```javascript
-  ir.join("AAPL", "MSFT", "GE")
-  ir.join(["GOOG", "VG"])
-  ir.join("$lobby")
-  ```
+```javascript
+ir.join("AAPL", "MSFT", "GE")
+ir.join(["GOOG", "VG"])
+ir.join("$lobby")
+```
+
+---------
 
 `leave(...channels)` - Leaves the given channels.
 * **Parameter** `channels` - An argument list or array of channels to leave.
-* **Example:**
-  ```javascript
-  ir.leave("AAPL", "MSFT", "GE")
-  ir.leave(["GOOG", "VG"])
-  ir.leave("$lobby")
-  ```
+```javascript
+ir.leave("AAPL", "MSFT", "GE")
+ir.leave(["GOOG", "VG"])
+ir.leave("$lobby")
+```
+
+---------
 
 `leaveAll()` - Leaves all joined channels.
+
+---------
 
 `listConnectedChannels()` - Returns the list of joined channels. Recently joined channels may not appear in this list immediately.
