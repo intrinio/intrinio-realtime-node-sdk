@@ -36,6 +36,25 @@ ir.onQuote(quote => {
 ir.join("AAPL", "MSFT", "GE")
 ```
 
+## Quote Fields
+
+```javascript
+{ type: 'ask',
+  timestamp: 1493409509.3932788,
+  ticker: 'GE',
+  size: 13750,
+  price: 28.97 }
+```
+
+*   **type** - the quote type
+  *    **`last`** - represents the last traded price
+  *    **`bid`** - represents the top-of-book bid price
+  *    **`ask`** - represents the top-of-book ask price
+*   **timestamp** - a Unix timestamp (with microsecond precision)
+*   **ticker** - the ticker of the security
+*   **size** - the size of the `last` trade, or total volume of orders at the top-of-book `bid` or `ask` price
+*   **price** - the price in USD
+
 ## Channels
 
 To receive price quotes from the Intrinio Real-Time API, you need to instruct the client to "join" a channel. A channel can be
