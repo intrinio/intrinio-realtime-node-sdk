@@ -90,7 +90,7 @@ var ir = new IntrinioRealtime({
 
 ---------
 
-`onError(callback)` - Invokes the given callback when a fatal error is encountered. If no callback has been registered, the error will be thrown.
+`onError(callback)` - Invokes the given callback when a fatal error is encountered. If no callback has been registered and no `error` event listener has been registered, the error will be thrown.
 * **Parameter** `callback` - The callback to invoke. The error will be passed as an argument to the callback.
 
 ---------
@@ -131,3 +131,15 @@ ir.leave("$lobby")
 ---------
 
 `listConnectedChannels()` - Returns the list of joined channels. Recently joined channels may not appear in this list immediately.
+
+### Events
+
+`connect` - Emitted when connected to the websocket successfully.
+
+---------
+
+`quote` - Emitted when a new quote has been received.
+
+---------
+
+`error` - Emitted when a fatal error is encountered. If no `onError` callback has been registered and no event listener has been registered, the error will be thrown.
