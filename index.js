@@ -3,6 +3,7 @@
 const https = require('https')
 const Promise = require('promise')
 const WebSocket = require('ws')
+const EventEmitter = require('events').EventEmitter;
 
 const TOKEN_EXPIRATION_INTERVAL = 1000 * 60 * 60 * 24 * 7 // 1 week
 const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
@@ -12,7 +13,7 @@ const HOST = "realtime.intrinio.com"
 const PORT = 443
 const WS_PROTOCOL = "wss"
 
-class IntrinioRealtime {
+class IntrinioRealtime extends EventEmitter {
   constructor(options) {
     this.options = options
     this.token = null
@@ -67,14 +68,20 @@ class IntrinioRealtime {
   }
 
   _throw(e) {
+    let handled = false;
     if (typeof e === 'string') {
       e = "IntrinioRealtime | " + e
     }
     if (typeof this.error_callback === 'function') {
       this.error_callback(e)
+      handled = true;
     }
-    else {
-      throw e
+    if (this.listenerCount('error') > 0) {
+      this.emit('error', e);
+      handled = true;
+    }
+    if (!handled) {
+      throw e;
     }
   }
 
@@ -90,6 +97,7 @@ class IntrinioRealtime {
     })
 
     this.afterConnected.done(() => {
+      this.emit('connect');
       this._stopSelfHeal()
       if (rejoin) { this._rejoinChannels() }
     },
@@ -177,7 +185,10 @@ class IntrinioRealtime {
         var message = JSON.parse(data)
         if (message.event === 'quote') {
           var quote = message.payload
-          this.quote_callback(quote)
+          if (typeof this.quote_callback === 'function') {
+            this.quote_callback(quote)
+          }
+          this.emit('quote', quote);
           this._debug('Quote: ', quote)
         }
         else {
