@@ -2,6 +2,8 @@
 
 [Intrinio](https://intrinio.com/) provides real-time stock prices from the [IEX stock exchange](https://iextrading.com/), via a two-way WebSocket connection. To get started, [subscribe here](https://intrinio.com/data/realtime-stock-prices) and follow the instructions below.
 
+*NOTE*: For use in web JavaScript, we recommend [https://github.com/intrinio/intrinio-realtime-web-sdk](https://github.com/intrinio/intrinio-realtime-web-sdk)
+
 ## Requirements
 
 - NodeJS 6.9.5
