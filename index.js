@@ -5,13 +5,9 @@ const Promise = require('promise')
 const WebSocket = require('ws')
 const EventEmitter = require('events').EventEmitter
 
-const TOKEN_EXPIRATION_INTERVAL = 1000 * 60 * 60 * 24 * 7 // 1 week
-const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
-const SELF_HEAL_BACKOFFS = [0,100,500,1000,2000,5000]
+const HEARTBEAT_INTERVAL = 1000 * 3 // 3 seconds
+const SELF_HEAL_BACKOFFS = [0,100,500,1000,2000]
 const WS_CLOSE_REASON_USER = 1000
-const HOST = "realtime.intrinio.com"
-const PORT = 443
-const WS_PROTOCOL = "wss"
 
 class IntrinioRealtime extends EventEmitter {
   constructor(options) {
@@ -20,7 +16,9 @@ class IntrinioRealtime extends EventEmitter {
     this.options = options
     this.token = null
     this.websocket = null
+    this.ready = false
     this.channels = {}
+    this.joinedChannels = {}
     this.afterConnected = null // Promise
     this.self_heal_backoff = Array.from(SELF_HEAL_BACKOFFS)
     this.self_heal_ref = null
@@ -39,14 +37,13 @@ class IntrinioRealtime extends EventEmitter {
     if (!options.password) {
       this._throw("Need a valid password")
     }
+    
+    if (!options.provider || (options.provider != "iex" && options.provider != "quodd")) {
+      this._throw("Need a valid provider: iex or quodd")
+    }
 
     // Establish connection
     this._connect()
-
-    // Refresh token every week
-    this.token_expiration_ref = setInterval(() => {
-      this._connect()
-    }, TOKEN_EXPIRATION_INTERVAL)
 
     // Send heartbeat at intervals
     this.heartbeat_ref = setInterval(()=> {
@@ -87,7 +84,7 @@ class IntrinioRealtime extends EventEmitter {
     }
   }
 
-  _connect(rejoin=false) {
+  _connect() {
     this._debug("Connecting...")
 
     this.afterConnected = new Promise((fulfill, reject) => {
@@ -99,15 +96,32 @@ class IntrinioRealtime extends EventEmitter {
     })
 
     this.afterConnected.done(() => {
+      this.ready = true
       this.emit('connect')
       this._stopSelfHeal()
-      if (rejoin) { this._rejoinChannels() }
+      if (this.provider == "iex") { this._refreshChannels() }
     },
     () => {
+      this.ready = false
       this._trySelfHeal()
     })
 
     return this.afterConnected
+  }
+  
+  _makeAuthUrl() {
+    if (this.options.provider == "iex") {
+      return {
+        host: "realtime.intrinio.com",
+        path: "/auth"
+      }
+    }
+    else if (this.options.provider == "quodd") {
+      return {
+        host: "api.intrinio.com",
+        path: "/token?type=QUODD"
+      }
+    }
   }
 
   _refreshToken() {
@@ -115,19 +129,18 @@ class IntrinioRealtime extends EventEmitter {
 
     return new Promise((fulfill, reject) => {
       var { username, password } = this.options
+      var { host, path } = this._makeAuthUrl()
 
       // Get token
       var options = {
-        host: HOST,
-        port: PORT,
-        path: '/auth',
-        method: 'GET',
+        host: host,
+        path: path,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Basic ' + new Buffer((username + ':' + password)).toString('base64')
         }
       }
-
+      
       var req = https.get(options, res => {
         if (res.statusCode == 401) {
           this._throw("Unable to authorize")
@@ -155,6 +168,15 @@ class IntrinioRealtime extends EventEmitter {
     })
   }
 
+  _makeSocketUrl() {
+    if (this.options.provider == "iex") {
+      return 'wss://realtime.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
+    }
+    else if (this.options.provider == "quodd") {
+      return 'ws://www6.quodd.com/WebStreamer/webStreamer/intrinio/' + encodeURIComponent(this.token)
+    }
+  }
+  
   _refreshWebsocket() {
     this._debug("Establishing websocket...")
 
@@ -163,7 +185,7 @@ class IntrinioRealtime extends EventEmitter {
         this.websocket.close(WS_CLOSE_REASON_USER, "User terminated")
       }
 
-      var socket_url = WS_PROTOCOL+'://'+HOST+":"+PORT+'/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
+      var socket_url = this._makeSocketUrl()
       this.websocket = new WebSocket(socket_url, {perMessageDeflate: false})
 
       this.websocket.on('open', () => {
@@ -184,9 +206,31 @@ class IntrinioRealtime extends EventEmitter {
       })
 
       this.websocket.on('message', (data, flags) => {
-        var message = JSON.parse(data)
-        if (message.event === 'quote') {
-          var quote = message.payload
+        try {
+          var message = JSON.parse(data)
+        }
+        catch (e) {
+          this._debug('Non-quote message: ', data)
+          return
+        }
+        
+        var quote = null
+        
+        if (this.options.provider == "iex") {
+          if (message.event === 'quote') {
+            quote = message.payload
+          }
+        }
+        else if (this.options.provider == "quodd") {
+          if (message.event === 'info' && message.data.message === 'Connected') {
+            this._refreshChannels()
+          }
+          else if (message.event === 'quote' || message.event == 'trade') {
+            quote = message.data
+          }
+        }
+        
+        if (quote) {
           if (typeof this.quote_callback === 'function') {
             this.quote_callback(quote)
           }
@@ -211,7 +255,7 @@ class IntrinioRealtime extends EventEmitter {
     if (this.self_heal_ref) { clearTimeout(this.self_heal_ref) }
 
     this.self_heal_ref = setTimeout(() => {
-      this._connect(true)
+      this._connect()
     }, time)
   }
 
@@ -224,27 +268,47 @@ class IntrinioRealtime extends EventEmitter {
     }
   }
 
-  _rejoinChannels() {
+  _refreshChannels() {
+    if (!this.ready) {
+      return
+    }
+    
+    // Join new channels
     for (var channel in this.channels) {
-      this.websocket.send(JSON.stringify({
-        topic: this._parseTopic(channel),
-        event: 'phx_join',
-        payload: {},
-        ref: null
-      }))
+      if (!this.joinedChannels[channel]) {
+        this.websocket.send(JSON.stringify(this._makeJoinMessage(channel)))
+        this._debug('Joined channel: ', channel)
+      }
+    }
+    
+    // Leave old channels
+    for (var channel in this.joinedChannels) {
+      if (!this.channels[channel]) {
+        this.websocket.send(JSON.stringify(this._makeLeaveMessage(channel)))
+        this._debug('Left channel: ', channel)
+      }
+    }
+    
+    this.joinedChannels = {}
+    for (var channel in this.channels) {
+      this.joinedChannels[channel] = true
+    }
+  }
 
-      this._debug('Rejoined channel: ', channel)
+  _makeHeartbeatMessage() {
+    if (this.options.provider == "iex") {
+      return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
+    }
+    else if (this.options.provider == "quodd") {
+      return {event: 'heartbeat', data: {action: 'heartbeat', ticker: Date.now()}}
     }
   }
 
   _heartbeat() {
     this.afterConnected.then(() => {
-      this.websocket.send(JSON.stringify({
-        topic: 'phoenix',
-        event: 'heartbeat',
-        payload: {},
-        ref: null
-      }))
+      var message = JSON.stringify(this._makeHeartbeatMessage())
+      this._debug("Heartbeat: ", message)
+      this.websocket.send(message)
     })
   }
 
@@ -278,8 +342,48 @@ class IntrinioRealtime extends EventEmitter {
 
     return channels
   }
+  
+  _makeJoinMessage(channel) {
+    if (this.options.provider == "iex") {
+      return {
+        topic: this._parseIexTopic(channel),
+        event: 'phx_join',
+        payload: {},
+        ref: null
+      }
+    }
+    else if (this.options.provider == "quodd") {
+      return {
+        event: "subscribe",
+        data: {
+          ticker: channel,
+          action: "subscribe"
+        }
+      }
+    }
+  }
+  
+  _makeLeaveMessage(channel) {
+    if (this.options.provider == "iex") {
+      return {
+        topic: this._parseIexTopic(channel),
+        event: 'phx_leave',
+        payload: {},
+        ref: null
+      }
+    }
+    else if (this.options.provider == "quodd") {
+      return {
+        event: "unsubscribe",
+        data: {
+          ticker: channel,
+          action: "unsubscribe"
+        }
+      }
+    }
+  }
 
-  _parseTopic(channel) {
+  _parseIexTopic(channel) {
     var topic = null
     if (channel == "$lobby") {
       topic = "iex:lobby"
@@ -321,62 +425,28 @@ class IntrinioRealtime extends EventEmitter {
 
   join(...channels) {
     var channels = this._parseChannels(channels)
-
-    return this.afterConnected.then(() => {
-      channels.forEach(channel => {
-        this.channels[channel] = true
-
-        this.websocket.send(JSON.stringify({
-          topic: this._parseTopic(channel),
-          event: 'phx_join',
-          payload: {},
-          ref: null
-        }))
-
-        this._debug('Joined channel: ', channel)
-      })
+    channels.forEach(channel => {
+      this.channels[channel] = true
     })
   }
 
   leave(...channels) {
     var channels = this._parseChannels(channels)
-
-    return this.afterConnected.then(() => {
-      channels.forEach(channel => {
-        delete this.channels[channel]
-
-        this.websocket.send(JSON.stringify({
-          topic: this._parseTopic(channel),
-          event: 'phx_leave',
-          payload: {},
-          ref: null
-        }))
-
-        this._debug('Left channel: ', channel)
-      })
+    channels.forEach(channel => {
+      delete this.channels[channel]
     })
+    
+    this._refreshChannels()
   }
 
   leaveAll() {
-    return this.afterConnected.then(() => {
-      for (var channel in this.channels) {
-        delete this.channels[channel]
-
-        this.websocket.send(JSON.stringify({
-          topic: this._parseTopic(channel),
-          event: 'phx_leave',
-          payload: {},
-          ref: null
-        }))
-
-        this._debug('Left channel: ', channel)
-      }
-    })
+    this.channels = {}
+    this._refreshChannels()
   }
 
   listConnectedChannels() {
     var channels = []
-    for (var channel in this.channels) {
+    for (var channel in this.joinedChannels) {
       channels.push(channel)
     }
     return channels
