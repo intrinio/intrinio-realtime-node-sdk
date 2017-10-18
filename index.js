@@ -173,7 +173,7 @@ class IntrinioRealtime extends EventEmitter {
       return 'wss://realtime.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
     }
     else if (this.options.provider == "quodd") {
-      return 'ws://www6.quodd.com/WebStreamer/webStreamer/intrinio/' + encodeURIComponent(this.token)
+      return 'wss://www5.quodd.com/websocket/webStreamer/intrinio/' + encodeURIComponent(this.token)
     }
   }
   
