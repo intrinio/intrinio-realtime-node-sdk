@@ -99,7 +99,9 @@ class IntrinioRealtime extends EventEmitter {
       this.ready = true
       this.emit('connect')
       this._stopSelfHeal()
-      if (this.provider == "iex") { this._refreshChannels() }
+      if (this.options.provider == "iex") { 
+        this._refreshChannels() 
+      }
     },
     () => {
       this.ready = false
