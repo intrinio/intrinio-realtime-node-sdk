@@ -430,6 +430,8 @@ class IntrinioRealtime extends EventEmitter {
     channels.forEach(channel => {
       this.channels[channel] = true
     })
+    
+    this._refreshChannels()
   }
 
   leave(...channels) {
