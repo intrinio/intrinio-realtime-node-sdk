@@ -30,6 +30,10 @@ class IntrinioRealtime extends EventEmitter {
       this._throw("Need a valid options parameter")
     }
 
+    if (!options.agent) {
+      this._throw("Need a valid agent")
+    }    
+
     if (!options.username) {
       this._throw("Need a valid username")
     }
@@ -130,13 +134,14 @@ class IntrinioRealtime extends EventEmitter {
     this._debug("Requesting auth token...")
 
     return new Promise((fulfill, reject) => {
-      var { username, password } = this.options
+      var { username, password, agent } = this.options
       var { host, path } = this._makeAuthUrl()
 
       // Get token
       var options = {
         host: host,
         path: path,
+        agent: agent,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Basic ' + new Buffer((username + ':' + password)).toString('base64')
@@ -188,7 +193,7 @@ class IntrinioRealtime extends EventEmitter {
       }
 
       var socket_url = this._makeSocketUrl()
-      this.websocket = new WebSocket(socket_url, {perMessageDeflate: false})
+      this.websocket = new WebSocket(socket_url, {perMessageDeflate: false, agent: this.options.agent})
 
       this.websocket.on('open', () => {
         this._debug("Websocket connected!")
