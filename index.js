@@ -30,10 +30,6 @@ class IntrinioRealtime extends EventEmitter {
       this._throw("Need a valid options parameter")
     }
 
-    if (!options.agent) {
-      this._throw("Need a valid agent")
-    }    
-
     if (!options.username) {
       this._throw("Need a valid username")
     }
@@ -134,7 +130,8 @@ class IntrinioRealtime extends EventEmitter {
     this._debug("Requesting auth token...")
 
     return new Promise((fulfill, reject) => {
-      var { username, password, agent } = this.options
+      var { username, password } = this.options
+      var agent = this.options.agent || false
       var { host, path } = this._makeAuthUrl()
 
       // Get token
