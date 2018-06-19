@@ -131,12 +131,14 @@ class IntrinioRealtime extends EventEmitter {
 
     return new Promise((fulfill, reject) => {
       var { username, password } = this.options
+      var agent = this.options.agent || false
       var { host, path } = this._makeAuthUrl()
 
       // Get token
       var options = {
         host: host,
         path: path,
+        agent: agent,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Basic ' + new Buffer((username + ':' + password)).toString('base64')
@@ -188,7 +190,7 @@ class IntrinioRealtime extends EventEmitter {
       }
 
       var socket_url = this._makeSocketUrl()
-      this.websocket = new WebSocket(socket_url, {perMessageDeflate: false})
+      this.websocket = new WebSocket(socket_url, {perMessageDeflate: false, agent: this.options.agent})
 
       this.websocket.on('open', () => {
         this._debug("Websocket connected!")
