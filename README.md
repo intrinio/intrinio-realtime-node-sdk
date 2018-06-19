@@ -262,3 +262,22 @@ ir.leave("$lobby")
 ---------
 
 `error` - Emitted when a fatal error is encountered. If no `onError` callback has been registered and no event listener has been registered, the error will be thrown.
+
+### Using a Proxy
+
+Use a custom `http.Agent` implementation like [https-proxy-agent](https://github.com/TooTallNate/node-https-proxy-agent) or [socks-proxy-agent](https://github.com/TooTallNate/node-socks-proxy-agent) and specify it as the `agent` parameter:
+ 
+```javascript
+var url = require('url');
+var HttpsProxyAgent = require('https-proxy-agent');
+var proxy = 'http://yourproxyaddress';
+var options = url.parse(proxy);
+var agent = new HttpsProxyAgent(options);
+
+var ir = new IntrinioRealtime({
+  username: "INTRINIO_API_USERNAME",
+  password: "INTRINIO_API_PASSWORD",
+  provider: "iex",
+  agent: agent
+})
+```
