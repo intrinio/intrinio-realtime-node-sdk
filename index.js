@@ -254,7 +254,10 @@ class IntrinioRealtime extends EventEmitter {
     var time = this.self_heal_backoff[0]
     if (this.self_heal_backoff.length > 1) {
       time = this.self_heal_backoff.shift()
-    }
+    }else{
+
+	process.exit()
+	}
 
     if (this.self_heal_ref) { clearTimeout(this.self_heal_ref) }
 
