@@ -20,7 +20,7 @@ class IntrinioRealtime extends EventEmitter {
     this.channels = {}
     this.joinedChannels = {}
     this.afterConnected = null // Promise
-    this.self_heal_backoff = Array.from(SELF_HEAL_BACKOFFS)
+    thi.self_heal_backoff = Array.from(SELF_HEAL_BACKOFFS)
     this.self_heal_ref = null
     this.quote_callback = null
     this.error_callback = null
@@ -251,6 +251,7 @@ class IntrinioRealtime extends EventEmitter {
   _trySelfHeal() {
     this._log("No connection! Retrying...")
 
+	process.exit()
     var time = this.self_heal_backoff[0]
     if (this.self_heal_backoff.length > 1) {
       time = this.self_heal_backoff.shift()
