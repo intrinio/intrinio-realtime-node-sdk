@@ -226,7 +226,7 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
   high: 6505.01,
   low: 6315,
   last_trade_time: "2018-10-29 23:08:01.834Z",
-  last_trade_side: nil,
+  last_trade_side: null,
   last_trade_price: 6326.97000000,
   last_trade_size: 0.00001200,
   type: "ticker" }
@@ -271,10 +271,10 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
     name: "Gemini",
     code: "gemini"
   },
-  bid: nil,
-  bid_size: nil,
-  ask: nil,
-  ask_size: nil,
+  bid: null,
+  bid_size: null,
+  ask: null,
+  ask_size: null,
   change: -133.40760000000046,
   change_percent: -2.059762280845255,
   volume: 22121.79710206001,
