@@ -123,35 +123,43 @@ class IntrinioRealtime extends EventEmitter {
   }
   
   _makeAuthUrl() {
-    if (this.options.provider == "iex") {
-      if (this.options.api_key) {
-        return {
-          host: "realtime.intrinio.com",
-          path: "/auth?api_key=" + this.options.api_key
-        }
+    var auth_url = {
+      host: "",
+      path: ""
+    }
 
-      }
-      else {
-        return {
-          host: "realtime.intrinio.com",
-          path: "/auth"
-        }
+    if (this.options.provider == "iex") {
+      auth_url = {
+        host: "realtime.intrinio.com",
+        path: "/auth"
       }
     }
     else if (this.options.provider == "quodd") {
-      if (this.options.api_key) {
-        return {
-          host: "api.intrinio.com",
-          path: "/token?type=QUODD&api_key=" + this.options.api_key
-        }
-      }
-      else {
-        return {
-          host: "api.intrinio.com",
-          path: "/token?type=QUODD"
-        }
+      auth_url = {
+        host: "api.intrinio.com",
+        path: "/token?type=QUODD"
       }
     }
+
+    if (this.options.api_key) {
+      auth_url = this._makeAPIAuthUrl(auth_url)
+    }
+
+    return auth_url
+  }
+
+  _makeAPIAuthUrl(auth_url) {
+    var path = auth_url.path
+
+    if (path.includes("?")) {
+      path = path + "&"
+    }
+    else {
+      path = path + "?"
+    }
+
+    auth_url.path = path + "api_key=" + this.options.api_key
+    return auth_url
   }
 
   _makeHeaders() {
