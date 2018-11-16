@@ -25,8 +25,7 @@ var IntrinioRealtime = require('intrinio-realtime')
 
 // Create an IntrinioRealtime instance
 var ir = new IntrinioRealtime({
-  username: "INTRINIO_API_USERNAME",
-  password: "INTRINIO_API_PASSWORD",
+  api_key: "INTRINIO_API_KEY",
   provider: "iex"
 })
 
@@ -344,18 +343,17 @@ To receive price quotes from Cryptoquote, you need to instruct the client to "jo
 * The trade pair lobby (`crypto:pair:trade:{pair_code}`) where trades for the provided currency pair are posted (i.e. `crypto:pair:trade:btcusd`)
 
 ## API Keys
-You will receive your Intrinio API Username and Password after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
+You will receive your Intrinio API Key after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
 
 ## Documentation
 
 ### Methods
 
 `constructor(options)` - Creates a new instance of the IntrinioRealtime client.
-* **Parameter** `options`: An object with `username`, `password`, and `provider` properties corresponding to your Intrinio API Username and Password and either "iex", "cryptoquote", or "quodd" providers.
+* **Parameter** `options`: An object with `api_key`, `username`, `password`, and `provider` properties corresponding to your Intrinio API Key, Username, and Password and either "iex", "quodd", or "cryptoquote" providers.
 ```javascript
 var ir = new IntrinioRealtime({
-  username: "INTRINIO_API_USERNAME",
-  password: "INTRINIO_API_PASSWORD",
+  api_key: "INTRINIO_API_KEY",
   provider: "iex"
 })
 ```
@@ -432,8 +430,7 @@ var options = url.parse(proxy);
 var agent = new HttpsProxyAgent(options);
 
 var ir = new IntrinioRealtime({
-  username: "INTRINIO_API_USERNAME",
-  password: "INTRINIO_API_PASSWORD",
+  api_key: "INTRINIO_API_KEY",
   provider: "iex",
   agent: agent
 })
