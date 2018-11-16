@@ -173,7 +173,7 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 ### Cryptoquote
 
 #### Book Update
-```ruby
+```javascript
 { pair: {
     name: "BTCUSD",
     code: "btcusd"
@@ -205,7 +205,7 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
   *    **`trade`** - a trade message (updating `last_trade_price`, `last_trade_time`, and `last_trade_size`)
 
 #### Ticker
-```ruby
+```javascript
 { last_updated: "2018-10-29 23:08:02.277Z",
   pair: {
     name: "BTCUSD",
@@ -261,7 +261,7 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
   *    **`trade`** - a trade message (updating `last_trade_price`, `last_trade_time`, and `last_trade_size`)
 
 #### Trade
-```ruby
+```javascript
 { last_updated: "2018-10-29 23:08:02.277Z",
   pair: {
     name: "BTCUSD",
