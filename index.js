@@ -292,7 +292,7 @@ class IntrinioRealtime extends EventEmitter {
           }
         }
         else if (this.options.provider == "cryptoquote") {
-          if (message.event === 'message') {
+          if (message.event === 'book_update' || message.event === 'ticker' || message.event === 'trade') {
             quote = message.payload
           }
         }
@@ -405,7 +405,7 @@ class IntrinioRealtime extends EventEmitter {
     })
 
     channels.forEach(channel => {
-      if (channel.length == 0 || channel.length > 20) {
+      if (channel.length == 0) {
         this._throw("Invalid channel provided")
       }
     })
@@ -431,7 +431,7 @@ class IntrinioRealtime extends EventEmitter {
         }
       }
     }
-    else if (this.options.provider == "cryptoquote") 
+    else if (this.options.provider == "cryptoquote") {
       return {
         topic: channel,
         event: 'phx_join',

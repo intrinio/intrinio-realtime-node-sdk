@@ -174,26 +174,20 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 
 #### Book Update
 ```javascript
-{ pair: {
-    name: "BTCUSD",
-    code: "btcusd"
-  },
-  exchange: {
-    name: "Gemini",
-    code: "gemini"
-  },
+{ pair_name: "BTCUSD",
+  pair_code: "btcusd",
+  exchange_name: "Gemini",
+  exchange_code: "gemini",
   side: "buy",
   price: 6337.4,
   size: 0.3,
   type: "book_update" }
 ```
 
-*   **pair** - details of the currency pair
-  *    **name** - the name of the currency pair
-  *    **code** - the code of the currency pair
-*   **exchange** - details of the exchange from which the message came from
-  *    **name** - the name of the exchange
-  *    **code** - the code of the exchange
+*   **pair_name** - the name of the currency pair
+*   **pair_code** - the code of the currency pair
+*   **exchange_name** - the name of the exchange
+*   **exchange_code** - the code of the exchange
 *   **side** - the side of the book this update is for
   *    **`buy`** - this is an update to the buy side of the book
   *    **`sell`** - this is an update to the sell side of the book
@@ -207,14 +201,10 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 #### Ticker
 ```javascript
 { last_updated: "2018-10-29 23:08:02.277Z",
-  pair: {
-    name: "BTCUSD",
-    code: "btcusd"
-  },
-  exchange: {
-    name: "Binance",
-    code: "binance"
-  },
+  pair_name: "BTCUSD",
+  pair_code: "btcusd",
+  exchange_name: "Binance",
+  exchange_code: "binance",
   bid: 6326,
   bid_size: 6.51933000,
   ask: 6326.97,
@@ -233,12 +223,10 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 ```
 
 *   **last_updated** - a UTC timestamp of when the ticker was last updated
-*   **pair** - details of the currency pair
-  *    **name** - the name of the currency pair
-  *    **code** - the code of the currency pair
-*   **exchange** - details of the exchange from which the message came from
-  *    **name** - the name of the exchange
-  *    **code** - the code of the exchange
+*   **pair_name** - the name of the currency pair
+*   **pair_code** - the code of the currency pair
+*   **exchange_name** - the name of the exchange
+*   **exchange_code** - the code of the exchange
 *   **ask** - the ask for the currency pair on the exchange
 *   **ask_size** - the size of the ask for the currency pair on the exchange
 *   **bid** - the bid for the currency pair on the exchange
@@ -263,14 +251,10 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 #### Trade
 ```javascript
 { last_updated: "2018-10-29 23:08:02.277Z",
-  pair: {
-    name: "BTCUSD",
-    code: "btcusd"
-  },
-  exchange: {
-    name: "Gemini",
-    code: "gemini"
-  },
+  pair_name: "BTCUSD",
+  pair_code: "btcusd",
+  exchange_name: "Gemini",
+  exchange_code: "gemini",
   bid: null,
   bid_size: null,
   ask: null,
@@ -289,12 +273,10 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 ```
 
 *   **last_updated** - a UTC timestamp of when the ticker was last updated
-*   **pair** - details of the currency pair
-  *    **name** - the name of the currency pair
-  *    **code** - the code of the currency pair
-*   **exchange** - details of the exchange from which the message came from
-  *    **name** - the name of the exchange
-  *    **code** - the code of the exchange
+*   **pair_name** - the name of the currency pair
+*   **pair_code** - the code of the currency pair
+*   **exchange_name** - the name of the exchange
+*   **exchange_code** - the code of the exchange
 *   **ask** - the ask for the currency pair on the exchange
 *   **ask_size** - the size of the ask for the currency pair on the exchange
 *   **bid** - the bid for the currency pair on the exchange
