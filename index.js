@@ -200,14 +200,12 @@ class IntrinioRealtime extends EventEmitter {
       this.websocket.on('close', (code, reason) => {
         this._debug("Websocket closed!")
         if (code != WS_CLOSE_REASON_USER) {
-          this.joinedChannels = {}
           this._trySelfHeal()
         }
       })
 
       this.websocket.on('error', e => {
         console.error("IntrinioRealtime | Websocket error: " + e)
-        this.joinedChannels = {}
         reject(e)
       })
 
