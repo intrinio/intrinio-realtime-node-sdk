@@ -49,8 +49,8 @@ class IntrinioRealtime extends EventEmitter {
       }
     }
     
-    if (!options.provider || (options.provider != "iex" && options.provider != "quodd")) {
-      this._throw("Need a valid provider: iex or quodd")
+    if (!options.provider || (options.provider != "iex" && options.provider != "quodd" && options.provider != "cryptoquote")) {
+      this._throw("Need a valid provider: iex, quodd, or cryptoquote")
     }
 
     // Establish connection
@@ -110,7 +110,7 @@ class IntrinioRealtime extends EventEmitter {
       this.ready = true
       this.emit('connect')
       this._stopSelfHeal()
-      if (this.options.provider == "iex") { 
+      if (this.options.provider == "iex" || this.options.provider == "cryptoquote") {
         this._refreshChannels() 
       }
     },
@@ -138,6 +138,12 @@ class IntrinioRealtime extends EventEmitter {
       auth_url = {
         host: "api.intrinio.com",
         path: "/token?type=QUODD"
+      }
+    }
+    else if (this.options.provider == "cryptoquote") {
+      auth_url = {
+        host: "crypto.intrinio.com",
+        path: "/auth"
       }
     }
 
@@ -228,6 +234,9 @@ class IntrinioRealtime extends EventEmitter {
     else if (this.options.provider == "quodd") {
       return 'wss://www5.quodd.com/websocket/webStreamer/intrinio/' + encodeURIComponent(this.token)
     }
+    else if (this.options.provider == "cryptoquote") {
+      return 'wss://crypto.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
+    }
   }
   
   _refreshWebsocket() {
@@ -282,6 +291,11 @@ class IntrinioRealtime extends EventEmitter {
           }
           else if (message.event === 'quote' || message.event == 'trade') {
             quote = message.data
+          }
+        }
+        else if (this.options.provider == "cryptoquote") {
+          if (message.event === 'book_update' || message.event === 'ticker' || message.event === 'trade') {
+            quote = message.payload
           }
         }
         
@@ -357,6 +371,9 @@ class IntrinioRealtime extends EventEmitter {
     else if (this.options.provider == "quodd") {
       return {event: 'heartbeat', data: {action: 'heartbeat', ticker: Date.now()}}
     }
+    else if (this.options.provider == "cryptoquote") {
+      return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
+    }
   }
 
   _heartbeat() {
@@ -390,7 +407,7 @@ class IntrinioRealtime extends EventEmitter {
     })
 
     channels.forEach(channel => {
-      if (channel.length == 0 || channel.length > 20) {
+      if (channel.length == 0) {
         this._throw("Invalid channel provided")
       }
     })
@@ -416,6 +433,14 @@ class IntrinioRealtime extends EventEmitter {
         }
       }
     }
+    else if (this.options.provider == "cryptoquote") {
+      return {
+        topic: channel,
+        event: 'phx_join',
+        payload: {},
+        ref: null
+      }
+    }
   }
   
   _makeLeaveMessage(channel) {
@@ -434,6 +459,14 @@ class IntrinioRealtime extends EventEmitter {
           ticker: channel,
           action: "unsubscribe"
         }
+      }
+    }
+    else if (this.options.provider == "cryptoquote") {
+      return {
+        topic: channel,
+        event: 'phx_leave',
+        payload: {},
+        ref: null
       }
     }
   }
