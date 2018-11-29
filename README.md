@@ -174,7 +174,7 @@ NOTE: Messages from QUOOD reflect _changes_ in market data. Not all fields will 
 
 #### Level 1 - Price Update
 
-NOTE: Null values some fields denote no change from previous value.
+NOTE: Null values for some fields denote no change from previous value.
 
 ```javascript
 { last_updated: "2018-10-29 23:08:02.277Z",
