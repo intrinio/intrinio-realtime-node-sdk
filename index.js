@@ -37,7 +37,7 @@ class IntrinioRealtime extends EventEmitter {
     }
     else {
       if (!options.username && !options.password) {
-        this.thorw("API key or username and password are required")
+        this._throw("API key or username and password are required")
       }
 
       if (!options.username) {

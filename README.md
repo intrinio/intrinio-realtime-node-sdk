@@ -287,7 +287,7 @@ You will receive your Intrinio API Key after [creating an account](https://intri
 ### Methods
 
 `constructor(options)` - Creates a new instance of the IntrinioRealtime client.
-* **Parameter** `options`: An object with `api_key`, `username`, `password`, and `provider` properties corresponding to your Intrinio API Key, Username, and Password and either "iex", "quodd", or "cryptoquote" providers.
+* **Parameter** `options`: An object with properties `api_key` and `provider`, corresponding to your Intrinio API Key and a provider code ("iex", "quodd", or "cryptoquote").
 ```javascript
 var ir = new IntrinioRealtime({
   api_key: "INTRINIO_API_KEY",
