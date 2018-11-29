@@ -1,6 +1,6 @@
-# Intrinio NodeJS SDK for Real-Time Stock Prices
+# Intrinio NodeJS SDK for Real-Time Stock & Crypto Prices
 
-[Intrinio](https://intrinio.com/) provides real-time stock prices via a two-way WebSocket connection. To get started, [subscribe to a real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) and follow the instructions below.
+[Intrinio](https://intrinio.com/) provides real-time stock & crypto prices via a two-way WebSocket connection. To get started, [subscribe to a real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) and follow the instructions below.
 
 *NOTE*: For use in web JavaScript, we recommend [https://github.com/intrinio/intrinio-realtime-web-sdk](https://github.com/intrinio/intrinio-realtime-web-sdk)
 
