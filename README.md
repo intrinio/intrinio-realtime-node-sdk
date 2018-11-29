@@ -25,8 +25,7 @@ var IntrinioRealtime = require('intrinio-realtime')
 
 // Create an IntrinioRealtime instance
 var ir = new IntrinioRealtime({
-  username: "INTRINIO_API_USERNAME",
-  password: "INTRINIO_API_PASSWORD",
+  api_key: "INTRINIO_API_KEY",
   provider: "iex"
 })
 
@@ -187,18 +186,17 @@ To receive price quotes from the Intrinio Real-Time API, you need to instruct th
 Special access is required for both lobby channels. [Contact us](mailto:sales@intrinio.com) for more information.
 
 ## API Keys
-You will receive your Intrinio API Username and Password after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
+You will receive your Intrinio API Key after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
 
 ## Documentation
 
 ### Methods
 
 `constructor(options)` - Creates a new instance of the IntrinioRealtime client.
-* **Parameter** `options`: An object with `username`, `password`, and `provider` properties corresponding to your Intrinio API Username and Password and either "iex" or "quodd" providers.
+* **Parameter** `options`: An object with properties `api_key` and `provider`, corresponding to your Intrinio API Key and a provider code ("iex" or "quodd").
 ```javascript
 var ir = new IntrinioRealtime({
-  username: "INTRINIO_API_USERNAME",
-  password: "INTRINIO_API_PASSWORD",
+  api_key: "INTRINIO_API_KEY",
   provider: "iex"
 })
 ```
@@ -275,8 +273,7 @@ var options = url.parse(proxy);
 var agent = new HttpsProxyAgent(options);
 
 var ir = new IntrinioRealtime({
-  username: "INTRINIO_API_USERNAME",
-  password: "INTRINIO_API_PASSWORD",
+  api_key: "INTRINIO_API_KEY",
   provider: "iex",
   agent: agent
 })
