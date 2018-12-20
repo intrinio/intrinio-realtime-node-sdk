@@ -111,7 +111,7 @@ class IntrinioRealtime extends EventEmitter {
       this.ready = true
       this.emit('connect')
       this._stopSelfHeal()
-      if (this.options.provider == "iex" || this.options.provider == "cryptoquote" || this.options.provider == "fxcm") {
+      if (["iex", "cryptoquote", "fxcm"].includes(this.options.provider)) {
         this._refreshChannels() 
       }
     },
@@ -380,16 +380,10 @@ class IntrinioRealtime extends EventEmitter {
   }
 
   _makeHeartbeatMessage() {
-    if (this.options.provider == "iex") {
-      return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
-    }
-    else if (this.options.provider == "quodd") {
+    if (this.options.provider == "quodd") {
       return {event: 'heartbeat', data: {action: 'heartbeat', ticker: Date.now()}}
     }
-    else if (this.options.provider == "cryptoquote") {
-      return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
-    }
-    else if (this.options.provider == "fxcm") {
+    else if (["iex", "cryptoquote", "fxcm"].includes(this.options.provider)) {
       return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
     }
   }
@@ -451,15 +445,7 @@ class IntrinioRealtime extends EventEmitter {
         }
       }
     }
-    else if (this.options.provider == "cryptoquote") {
-      return {
-        topic: channel,
-        event: 'phx_join',
-        payload: {},
-        ref: null
-      }
-    }
-    else if (this.options.provider == "fxcm") {
+    else if (["cryptoquote", "fxcm"].includes(this.options.provider)) {
       return {
         topic: channel,
         event: 'phx_join',
@@ -487,15 +473,7 @@ class IntrinioRealtime extends EventEmitter {
         }
       }
     }
-    else if (this.options.provider == "cryptoquote") {
-      return {
-        topic: channel,
-        event: 'phx_leave',
-        payload: {},
-        ref: null
-      }
-    }
-    else if (this.options.provider == "fxcm") {
+    else if (["cryptoquote", "fxcm"].includes(this.options.provider)) {
       return {
         topic: channel,
         event: 'phx_leave',
