@@ -287,10 +287,15 @@ class IntrinioRealtime extends EventEmitter {
           this._debug('Non-quote message: ', data)
           return
         }
-        
+
         var quote = null
-        
-        if (this.options.provider == "iex") {
+
+        if (message.event == "phx_reply" && message.payload.status == "error") {
+          var error = message.payload.response
+          console.error("IntrinioRealtime | Websocket data error: " + error)
+          this._throw(error)
+        }
+        else if (this.options.provider == "iex") {
           if (message.event === 'quote') {
             quote = message.payload
           }
