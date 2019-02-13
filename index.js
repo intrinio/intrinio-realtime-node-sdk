@@ -49,8 +49,9 @@ class IntrinioRealtime extends EventEmitter {
       }
     }
     
-    if (!options.provider || (options.provider != "iex" && options.provider != "quodd" && options.provider != "cryptoquote")) {
-      this._throw("Need a valid provider: iex, quodd, or cryptoquote")
+    var providers = ["iex", "quodd", "cryptoquote", "fxcm"]
+    if (!options.provider || !providers.includes(options.provider)) {
+      this._throw("Need a valid provider: iex, quodd, cryptoquote, or fxcm")
     }
 
     // Establish connection
@@ -110,7 +111,7 @@ class IntrinioRealtime extends EventEmitter {
       this.ready = true
       this.emit('connect')
       this._stopSelfHeal()
-      if (this.options.provider == "iex" || this.options.provider == "cryptoquote") {
+      if (["iex", "cryptoquote", "fxcm"].includes(this.options.provider)) {
         this._refreshChannels() 
       }
     },
@@ -143,6 +144,12 @@ class IntrinioRealtime extends EventEmitter {
     else if (this.options.provider == "cryptoquote") {
       auth_url = {
         host: "crypto.intrinio.com",
+        path: "/auth"
+      }
+    }
+    else if (this.options.provider == "fxcm") {
+      auth_url = {
+        host: "fxcm.intrinio.com",
         path: "/auth"
       }
     }
@@ -237,6 +244,9 @@ class IntrinioRealtime extends EventEmitter {
     else if (this.options.provider == "cryptoquote") {
       return 'wss://crypto.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
     }
+    else if (this.options.provider == "fxcm") {
+      return 'wss://fxcm.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
+    }
   }
   
   _refreshWebsocket() {
@@ -277,10 +287,15 @@ class IntrinioRealtime extends EventEmitter {
           this._debug('Non-quote message: ', data)
           return
         }
-        
+
         var quote = null
-        
-        if (this.options.provider == "iex") {
+
+        if (message.event == "phx_reply" && message.payload.status == "error") {
+          var error = message.payload.response
+          console.error("IntrinioRealtime | Websocket data error: " + error)
+          this._throw(error)
+        }
+        else if (this.options.provider == "iex") {
           if (message.event === 'quote') {
             quote = message.payload
           }
@@ -295,6 +310,11 @@ class IntrinioRealtime extends EventEmitter {
         }
         else if (this.options.provider == "cryptoquote") {
           if (message.event === 'book_update' || message.event === 'ticker' || message.event === 'trade') {
+            quote = message.payload
+          }
+        }
+        else if (this.options.provider == "fxcm") {
+          if (message.event === 'price_update') {
             quote = message.payload
           }
         }
@@ -365,13 +385,10 @@ class IntrinioRealtime extends EventEmitter {
   }
 
   _makeHeartbeatMessage() {
-    if (this.options.provider == "iex") {
-      return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
-    }
-    else if (this.options.provider == "quodd") {
+    if (this.options.provider == "quodd") {
       return {event: 'heartbeat', data: {action: 'heartbeat', ticker: Date.now()}}
     }
-    else if (this.options.provider == "cryptoquote") {
+    else if (["iex", "cryptoquote", "fxcm"].includes(this.options.provider)) {
       return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
     }
   }
@@ -433,7 +450,7 @@ class IntrinioRealtime extends EventEmitter {
         }
       }
     }
-    else if (this.options.provider == "cryptoquote") {
+    else if (["cryptoquote", "fxcm"].includes(this.options.provider)) {
       return {
         topic: channel,
         event: 'phx_join',
@@ -461,7 +478,7 @@ class IntrinioRealtime extends EventEmitter {
         }
       }
     }
-    else if (this.options.provider == "cryptoquote") {
+    else if (["cryptoquote", "fxcm"].includes(this.options.provider)) {
       return {
         topic: channel,
         event: 'phx_leave',

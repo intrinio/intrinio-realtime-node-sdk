@@ -1,6 +1,6 @@
-# Intrinio NodeJS SDK for Real-Time Stock & Crypto Prices
+# Intrinio NodeJS SDK for Real-Time Stock, Forex, and Crypto Prices
 
-[Intrinio](https://intrinio.com/) provides real-time stock & crypto prices via a two-way WebSocket connection. To get started, [subscribe to a real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) and follow the instructions below.
+[Intrinio](https://intrinio.com/) provides real-time stock, forex, and crypto prices via a two-way WebSocket connection. To get started, [subscribe to a real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) and follow the instructions below.
 
 *NOTE*: For use in web JavaScript, we recommend [https://github.com/intrinio/intrinio-realtime-web-sdk](https://github.com/intrinio/intrinio-realtime-web-sdk)
 
@@ -11,8 +11,8 @@
 ## Features
 
 * Receive streaming, real-time price quotes (last trade, bid, ask)
-* Subscribe to updates from individual securities
-* Subscribe to updates for all securities (contact us for special access)
+* Subscribe to updates from individual securities, forex pairs, or cryptos
+* Subscribe to updates for all securities, forex pairs, or cryptos (contact us for special access)
 
 ## Installation
 ```
@@ -46,6 +46,7 @@ Currently, Intrinio offers realtime data from the following providers:
 * IEX - [Homepage](https://iextrading.com/)
 * QUODD - [Homepage](http://home.quodd.com/)
 * Cryptoquote - [Homepage](https://www.cryptoquote.io/)
+* FXCM - [Homepage](https://www.fxcm.com/)
 
 Each has distinct price channels and quote formats, but a very similar API.
 
@@ -249,6 +250,21 @@ NOTE: Null values for some fields denote no change from previous value.
   *    **`level_1`** - a messages that denotes a change to the last traded price or top-of-the-book bid or ask
   *    **`level_2`** - a message that denotes a change to an order book
 
+### FXCM
+
+#### Price update
+```javascript
+{ code: "EUR/USD",
+  bid_price: 1.13685,
+  ask_price: 1.13711,
+  time: "2018-12-18 22:38:06.964Z" }
+```
+
+*   **code** - the code of the fx currency pair
+*   **bid_price** - the bid price is the price a buyer is willing to pay
+*   **ask_price** - the ask price is the price a seller is willing to accept
+*   **time** - the UTC timestamp of the price update
+
 ## Channels
 
 ### QUODD
@@ -278,6 +294,19 @@ The Intrinio REST API provides a listing of pairs, exchanges, and their correspo
 
 * [Crypto Currency Pairs](https://docs.intrinio.com/documentation/download/crypto_pairs)
 * [Crypto Exchanges](https://docs.intrinio.com/documentation/download/crypto_exchanges)
+
+### FXCM
+
+To receive price quotes from FXCM, you need to instruct the client to "join" a channel. A channel can be
+
+* `fxcm:pair:{pair_code}` - the fx currency pair channel where price updates for the provided currency pair are posted (i.e. `fxcm:pair:EUR/USD`)
+* `fxcm:base:{currency_code}` - the fx currency channel where prices updates for any fx currency pair that has the provided currency as the base currency (i.e. `fxcm:base:EUR` would post prices from EUR/USD, EUR/JPY, etc.)
+* `fxcm:quote:{currency_code}` - the fx currency channel where prices updates for any fx currency pair that has the provided currency as the quote currency (i.e. `fxcm:quote:EUR` would post prices from EUR/USD, JPY/USD, etc.)
+
+The Intrinio REST API provides a listing of pairs, currencies, and their corresponding codes:
+
+* [FX Currencies](https://docs.intrinio.com/documentation/download/currencies)
+* [FX Currency Pairs](https://docs.intrinio.com/documentation/download/currency_pairs)
 
 ## API Keys
 You will receive your Intrinio API Key after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
