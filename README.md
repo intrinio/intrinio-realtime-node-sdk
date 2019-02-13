@@ -276,8 +276,8 @@ To receive price quotes from Cryptoquote, you need to instruct the client to "jo
 
 The Intrinio REST API provides a listing of pairs, exchanges, and their corresponding codes:
 
-* [Crypto Currency Pairs](https://intrinio.com/documentation/download#crypto_currency_pairs)
-* [Crypto Exchanges](https://intrinio.com/documentation/download#crypto_exchanges)
+* [Crypto Currency Pairs](https://docs.intrinio.com/documentation/download/crypto_pairs)
+* [Crypto Exchanges](https://docs.intrinio.com/documentation/download/crypto_exchanges)
 
 ## API Keys
 You will receive your Intrinio API Key after [creating an account](https://intrinio.com/signup). You will need a subscription to the [IEX Real-Time Stock Prices](https://intrinio.com/data/realtime-stock-prices) data feed as well.
