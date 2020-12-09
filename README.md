@@ -11,7 +11,7 @@
 ## Features
 
 * Receive streaming, real-time price quotes (last trade, bid, ask)
-* Subscribe to updates from individual securitie or forex pairs
+* Subscribe to updates from individual securities or forex pairs
 * Subscribe to updates for all securities or forex pairs
 
 ## Installation
