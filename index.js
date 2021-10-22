@@ -2,57 +2,201 @@
 
 const https = require('https')
 const Promise = require('promise')
+const { threadId } = require('worker_threads')
 const WebSocket = require('ws')
-const EventEmitter = require('events').EventEmitter
+const Config = require('./config.json')
 
-const HEARTBEAT_INTERVAL = 1000 * 3 // 3 seconds
-const SELF_HEAL_BACKOFFS = [0,100,500,1000,2000]
-const WS_CLOSE_REASON_USER = 1000
+const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
+const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000]
 
-class IntrinioRealtime extends EventEmitter {
-  constructor(options) {
-    super()
-    
-    this.options = options
+class IntrinioRealtime {
+  constructor(apiKey, onTrade, onQuote) {
     this.token = null
+    this.tokenTime = null
     this.websocket = null
-    this.ready = false
+    this.isReady = false
+    this.isReconnecting = false
+    this.lastReset = Date.now()
+    this.dataMsgCount = 0
+    this.textMsgCount = 0
     this.channels = {}
-    this.joinedChannels = {}
-    this.afterConnected = null // Promise
-    this.self_heal_backoff = Array.from(SELF_HEAL_BACKOFFS)
-    this.self_heal_ref = null
-    this.quote_callback = null
-    this.error_callback = null
 
-    // Parse options
-    if (!options) {
-      this._throw("Need a valid options parameter")
+    if (!Config) {
+      throw "Intrinio Realtime Client - config.json not found"
     }
 
-    if (options.api_key) {
-      if (!this._validAPIKey(options.api_key)) {
-        this._throw("API Key was formatted invalidly")
-      }
+    if ((!Config.ApiKey) || (Config.ApiKey === "")) {
+      throw "Intrinio Realtime Client - API Key is required"
     }
-    else {
-      if (!options.username && !options.password) {
-        this._throw("API key or username and password are required")
-      }
 
-      if (!options.username) {
-        this._throw("Need a valid username")
-      }
+    if ((!Config.Provider) || ((Config.Provider != "REALTIME") || (Config.Provider != "MANUAL"))){
+      throw "Intrinio Realtime Client - 'Provider' must be specified and valid"
+    }
 
-      if (!options.password) {
-        this._throw("Need a valid password")
+    if ((Config.Provider = "MANUAL") && ((!Config.IPAddress) || (Config.IPAddress === ""))) {
+      throw "Intrinio Realtime Client - 'IPAddress' must be specified for manual configuration"
+    }
+  }
+
+  getAuthUrl() {
+    switch(Config.Provider) {
+      case "REALTIME": return "https://realtime-mx.intrinio.com/auth?api_key=" + Config.ApiKey
+      case "MANUAL": return "http://" + Config.IPAddress + "/auth?api_key=" + Config.ApiKey
+      default: throw "Intrinio Realtime Client - 'Provider' not specified!"
+    }
+  }
+
+  getWebSocketUrl(token) {
+    switch(Config.Provider) {
+      case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + token
+      case "MANUAL": return "ws://" + Config.IPAddress + "/socket/websocket?vsn=1.0.0&token=" + token
+      default: throw "Intrinio Realtime Client - 'Provider' not specified!"
+    }
+  }
+
+  parseTrade (buffer, symbolLength) {
+    return {
+      Symbol: buffer.toString("ascii", 2, symbolLength),
+      Price: float (buffer.readInt32LE(2 + symbolLength)) / 10000.0,
+      Size: buffer.readUInt32LE(6 + symbolLength),
+      Timestamp: buffer.readUInt64LE(10 + symbolLength),
+      TotalVolume: buffer.readUInt32LE(18 + symbolLength)
+    }
+  }
+
+  parseQuote (buffer, symbolLength) {
+    return {
+      Type: int(buffer[0]),
+      Symbol: buffer.toString("ascii", 2, symbolLength),
+      Price: float(buffer.readInt32LE(2 + symbolLength)) / 10000.0,
+      Size: buffer.readUInt32LE(6 + symbolLength),
+      Timestamp: buffer.readUInt64LE(10 + symbolLength)
+    }
+  }
+
+  parseSocketMessage(bytes) {
+    let buffer = Buffer.from(bytes)
+    let msgCount = int(buffer[0])
+    let startIndex = 1
+    for (let i = 0; i < msgCount; i++) {
+      let msgType = int(buffer[startIndex])
+      let symbolLength = int(buffer[startIndex + 1])
+      switch(msgType) {
+        case 0:
+          let endIndex = startIndex + 22 + symbolLength
+          let chunk = buffer.subarray(startIndex, endIndex)
+          let trade = this.parseTrade(chunk, symbolLength)
+          startIndex = endIndex
+          onTrade(trade)
+          break;
+        case 1:
+        case 2:
+          let endIndex = startIndex + 18 + symbolLength
+          let chunk = buffer.subarray(startIndex, endIndex)
+          let trade = this.parseQuote(chunk, symbolLength)
+          startIndex = endIndex
+          onQuote(trade)
+          break;
+        default: console.warn("Intrinio Realtime Client - Invalid message type: {0}", msgType)
       }
     }
-    
-    var providers = ["iex", "quodd", "cryptoquote", "fxcm"]
-    if (!options.provider || !providers.includes(options.provider)) {
-      this._throw("Need a valid provider: iex, quodd, cryptoquote, or fxcm")
+  }
+
+  doBackoff(callback) {
+    let i = 0
+    let backoff = SELF_HEAL_BACKOFFS[i]
+    let success = callback()
+    while (!success) {
+      i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1)
+      backoff = SELF_HEAL_BACKOFFS[i]
+      success = callback()
     }
+  }
+
+  trySetToken() {
+    console.log("Intrinio Realtime Client - Authorizing...")
+    let url = this.getAuthUrl()
+    let request = https.get(url, response => {
+      if (response.statusCode == 401) {
+        console.error("Intrinio Realtime Client - Unable to authorize")
+        return false
+      }
+      else if (response.statusCode != 200) {
+        console.error("Intrinio Realtime Client - Could not get auth token: Status code " + response.statusCode)
+        return false
+      }
+      else {
+        response.on("data", data => {
+            this.token = Buffer.from(data).toString("utf8")
+            console.log("Authorized")
+            return true
+        })
+      }
+    })
+    request.on("timeout", () => {
+      console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
+      return false
+    })
+    request.on("error", error => {
+      console.error("Intrinio Realtime Client - Unable to get auth token: "+ error)
+      return false
+    })
+    request.end()
+  }
+
+  getToken() {
+    if ((Date.now.getDate() - 1) > this.tokenTime) {
+      return token
+    } else {
+      this.doBackoff(this.trySetToken)
+      return token
+    }
+  }
+
+  makeJoinMessage(tradesOnly, symbol) {
+    switch (symbol) {
+      case "lobby":
+        let message = Buffer.alloc(11)
+        message.writeUInt8(74, 0)
+        if (tradesOnly) {
+          message.writeUInt8(1, 1)
+        } else {
+          message.writeUInt8(0, 1)
+        }
+        message.write("$FIREHOSE", "ascii", 2)
+        return message
+      default:
+        let message = Buffer.alloc(2 + symbol.length)
+        message.writeUInt8(74, 0)
+        if (tradesOnly) {
+          message.writeUInt8(1, 1)
+        } else {
+          message.writeUInt8(0, 1)
+        }
+        message.write(symbol, "ascii", 2)
+        return message
+    }
+  }
+
+  makeLeaveMessage(symbol) {
+    switch (symbol) {
+      case "lobby":
+        let message = Buffer.alloc(10)
+        message.writeUInt8(76, 0)
+        message.write("$FIREHOSE", "ascii", 1)
+        return message
+      default:
+        let message = Buffer.alloc(1 + symbol.length)
+        message.writeUInt8(76, 0)
+        message.write(symbol, "ascii", 1)
+        return message
+    }
+  }  
+
+
+
+
+
 
     // Establish connection
     this._connect()
