@@ -1,5 +1,6 @@
 'use strict'
 
+const { log } = require('console')
 const https = require('https')
 const Promise = require('promise')
 const WebSocket = require('ws')
@@ -18,7 +19,7 @@ class IntrinioRealtime {
     this._tokenTime = null
     this._websocket = null
     this._isReady = false
-    this._isReconnecting = false
+    this._doReconnect = true
     this._lastReset = Date.now()
     this._msgCount = 0
     this._channels = new Map()
@@ -34,13 +35,26 @@ class IntrinioRealtime {
       throw "Intrinio Realtime Client - API Key is required"
     }
 
-    if ((!Config.Provider) || ((Config.Provider != "REALTIME") || (Config.Provider != "MANUAL"))){
-      throw "Intrinio Realtime Client - 'Provider' must be specified and valid"
+    if (!Config.Provider) {
+      throw "Intrinio Realtime Client - 'Provider' must be specified"
+    }
+    else if ((Config.Provider !== "REALTIME") && (Config.Provider !== "MANUAL")) {
+      throw "Intrinio Realtime Client - 'Provider' must be either 'REALTIME' or 'MANUAL'"
     }
 
-    if ((Config.Provider = "MANUAL") && ((!Config.IPAddress) || (Config.IPAddress === ""))) {
+    if ((Config.Provider === "MANUAL") && ((!Config.IPAddress) || (Config.IPAddress === ""))) {
       throw "Intrinio Realtime Client - 'IPAddress' must be specified for manual configuration"
     }
+
+    process.on("SIGINT", () => {
+      console.log("Intrinio Realtime Client - Shutdown detected")
+      this.stop()})
+
+    this._trySetToken().then(
+      () => {this._resetWebsocket().then(
+        () => {console.log("Intrinio Realtime Client - Startup succeeded")},
+        () => {console.error("Intrinio Realtime Client - Startup failed. Unable to establish websocket connection.")})},
+      () => {console.error("Intrinio Realtime Client - Startup failed. Unable to acquire auth token.")})
   }
 
   _getAuthUrl() {
@@ -86,23 +100,25 @@ class IntrinioRealtime {
     for (let i = 0; i < msgCount; i++) {
       let msgType = int(buffer[startIndex])
       let symbolLength = int(buffer[startIndex + 1])
+      let endIndex = startIndex + symbolLength
+      let chunk = null
       switch(msgType) {
         case 0:
-          let endIndex = startIndex + 22 + symbolLength
-          let chunk = buffer.subarray(startIndex, endIndex)
+          endIndex = endIndex + 22
+          chunk = buffer.subarray(startIndex, endIndex)
           let trade = this._parseTrade(chunk, symbolLength)
           startIndex = endIndex
           this._onTrade(trade)
           break;
         case 1:
         case 2:
-          let endIndex = startIndex + 18 + symbolLength
-          let chunk = buffer.subarray(startIndex, endIndex)
-          let trade = this._parseQuote(chunk, symbolLength)
+          endIndex = endIndex + 18
+          chunk = buffer.subarray(startIndex, endIndex)
+          let quote = this._parseQuote(chunk, symbolLength)
           startIndex = endIndex
-          this._onQuote(trade)
+          this._onQuote(quote)
           break;
-        default: console.warn("Intrinio Realtime Client - Invalid message type: {0}", msgType)
+        default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType)
       }
     }
   }
@@ -113,47 +129,49 @@ class IntrinioRealtime {
     }
   }
 
-  async _doBackoff(callback) {
+  async _doBackoff(booleanCallback) {
     let i = 0
     let backoff = SELF_HEAL_BACKOFFS[i]
-    let success = callback()
+    let success = await booleanCallback()
     while (!success) {
-      sleep(backoff)
+      await sleep(backoff)
       i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1)
       backoff = SELF_HEAL_BACKOFFS[i]
-      success = callback()
+      success = await booleanCallback()
     }
   }
 
   _trySetToken() {
-    console.log("Intrinio Realtime Client - Authorizing...")
-    let url = this._getAuthUrl()
-    let request = https.get(url, response => {
-      if (response.statusCode == 401) {
-        console.error("Intrinio Realtime Client - Unable to authorize")
-        return false
-      }
-      else if (response.statusCode != 200) {
-        console.error("Intrinio Realtime Client - Could not get auth token: Status code " + response.statusCode)
-        return false
-      }
-      else {
-        response.on("data", data => {
-            this._token = Buffer.from(data).toString("utf8")
-            console.log("Authorized")
-            return true
-        })
-      }
+    return new Promise((fulfill, reject) => {
+      console.log("Intrinio Realtime Client - Authorizing...")
+      let url = this._getAuthUrl()
+      let request = https.get(url, response => {
+        if (response.statusCode == 401) {
+          console.error("Intrinio Realtime Client - Unable to authorize")
+          reject(false)
+        }
+        else if (response.statusCode != 200) {
+          console.error("Intrinio Realtime Client - Could not get auth token: Status code " + response.statusCode)
+          reject(false)
+        }
+        else {
+          response.on("data", data => {
+              this._token = Buffer.from(data).toString("utf8")
+              console.log("Intrinio Realtime Client - Authorized")
+              fulfill(true)
+          })
+        }
+      })
+      request.on("timeout", () => {
+        console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
+        reject(false)
+      })
+      request.on("error", error => {
+        console.error("Intrinio Realtime Client - Unable to get auth token: "+ error)
+        reject(false)
+      })
+      request.end()
     })
-    request.on("timeout", () => {
-      console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
-      return false
-    })
-    request.on("error", error => {
-      console.error("Intrinio Realtime Client - Unable to get auth token: "+ error)
-      return false
-    })
-    request.end()
   }
 
   _updateToken() {
@@ -163,88 +181,88 @@ class IntrinioRealtime {
   }
 
   _makeJoinMessage(tradesOnly, symbol) {
+    let message = null
     switch (symbol) {
       case "lobby":
-        let message = Buffer.alloc(11)
+        message = Buffer.alloc(11)
         message.writeUInt8(74, 0)
         if (tradesOnly) {
           message.writeUInt8(1, 1)
         } else {
           message.writeUInt8(0, 1)
         }
-        message.write("$FIREHOSE", "ascii", 2)
+        message.write("$FIREHOSE", 2, "ascii")
         return message
       default:
-        let message = Buffer.alloc(2 + symbol.length)
+        message = Buffer.alloc(2 + symbol.length)
         message.writeUInt8(74, 0)
         if (tradesOnly) {
           message.writeUInt8(1, 1)
         } else {
           message.writeUInt8(0, 1)
         }
-        message.write(symbol, "ascii", 2)
+        message.write(symbol, 2, "ascii")
         return message
     }
   }
 
   _makeLeaveMessage(symbol) {
+    let message = null
     switch (symbol) {
       case "lobby":
-        let message = Buffer.alloc(10)
+        message = Buffer.alloc(10)
         message.writeUInt8(76, 0)
-        message.write("$FIREHOSE", "ascii", 1)
+        message.write("$FIREHOSE", 1, "ascii")
         return message
       default:
-        let message = Buffer.alloc(1 + symbol.length)
+        message = Buffer.alloc(1 + symbol.length)
         message.writeUInt8(76, 0)
-        message.write(symbol, "ascii", 1)
+        message.write(symbol, 1, "ascii")
         return message
     }
-  }  
-
-  _onOpen(_) {
-    console.log("Intrinio Realtime Client - Websocket connected.")
-    this._isReady = true
-    this._isReconnecting = false
-    if (!this._heartbeat) {
-      this._heartbeat = setInterval(this._heartbeatFn, HEARTBEAT_INTERVAL)
-    }
-    if (this._channels.size > 0) {
-      for (const [channel, tradesOnly] of this._channels) {
-        let message = this._makeJoinMessage(tradesOnly, channel)
-        console.info("Intrinio Realtime Client - Joining channel: {0} (trades only = {1})", channel, tradesOnly)
-        this._websocket.send(message)
-      }
-    }
-  }
-
-  _onClose(code, reason) {
-    if (!this._isReconnecting) {
-      console.info("Intrinio Realtime Client - Websocket closed ({0}): {1}", code, reason)
-      this._isReady = false
-      this._tryReconnect()
-    }
-  }
-
-  _onError(error) {
-    console.error("Intrinio Realtime Client - Websocket error: {0}", error)
-  }
-
-  _onMessage(message) {
-    this._msgCount++
-    this._parseSocketMessage(message)
   }
 
   _resetWebsocket() {
-    console.info("Intrinio Realtime Client - Websocket initializing")
-    let wsUrl = this._getWebSocketUrl()
-    let ws = new WebSocket(wsUrl, {perMessageDeflate: false})
-    ws.on("open", this._onOpen)
-    ws.on("close", this._onClose)
-    ws.on("error", this._onError)
-    ws.on("message", this._onMessage)
-    this._websocket = ws
-    this._lastReset = Date.now()
+    const self = this
+    return new Promise((fulfill, reject) => {
+      console.info("Intrinio Realtime Client - Websocket initializing")
+      let wsUrl = self._getWebSocketUrl()
+      self._websocket = new WebSocket(wsUrl, {perMessageDeflate: false})
+      self._websocket.on("open", () => {
+        console.log("Intrinio Realtime Client - Websocket connected")
+        if (!self._heartbeat) {
+          console.log("Intrinio Realtime Client - Starting heartbeat")
+          self._heartbeat = setInterval(self._heartbeatFn, HEARTBEAT_INTERVAL)
+        }
+        if (self._channels.size > 0) {
+          for (const [channel, tradesOnly] of self._channels) {
+            let message = self._makeJoinMessage(tradesOnly, channel)
+            console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
+            self._websocket.send(message)
+          }
+        }
+        self._lastReset = Date.now()
+        self._isReady = true
+        fulfill(true)
+      })
+      self._websocket.on("close", (code, reason) => {
+        self._isReady = false
+        clearInterval(self._heartbeat)
+        self._heartbeat = null
+        console.info("Intrinio Realtime Client - Websocket closed (%o: %s)", code, reason)
+        if (self._doReconnect) {
+          self._tryReconnect()
+        }
+      })
+      self._websocket.on("error", (error) => {
+        console.error("Intrinio Realtime Client - Websocket error: %s", error)
+        reject(false)
+      })
+      self._websocket.on("message", (message) => {
+        self._msgCount++
+        self._parseSocketMessage(message)
+      })
+    })
   }
 
   _reconnectFn() {
@@ -267,85 +285,80 @@ class IntrinioRealtime {
     if (!this._channels.has(symbol)) {
       this._channels.set(symbol, tradesOnly)
       let message = this._makeJoinMessage(tradesOnly, symbol)
-      console.info("Intrinio Realtime Client - Joining channel: {0} (trades only = {1})", symbol, tradesOnly)
-      this.websocket.send(message, (_) => {this._channels.delete(symbol)})
-    }
-  }
-
-  _leave(symbol, tradesOnly) {
-    if (this._channels.has(symbol)) {
-      this._channels.delete(symbol)
-      let message = this._makeLeaveMessage(tradesOnly, symbol)
-      console.info("Intrinio Realtime Client - Leaving channel: {0} (trades only = {1})", symbol, tradesOnly)
+      console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", symbol, tradesOnly)
       this._websocket.send(message)
     }
   }
 
-  async join() {
+  _leave(symbol) {
+    if (this._channels.has(symbol)) {
+      this._channels.delete(symbol)
+      let message = this._makeLeaveMessage(symbol)
+      console.info("Intrinio Realtime Client - Leaving channel: %s", symbol)
+      this._websocket.send(message)
+    }
+  }
+
+  async join(symbols, tradesOnly) {
     while (!this._isReady) {
       await sleep(1000)
     }
-    let tradesOnly = Config.TradesOnly ? Config.TradesOnly : false
-    for (const symbol of Config.Symbols) {
-      if (!this._channels.has(symbol)){
-        this._join(symbol, tradesOnly)
+    let _tradesOnly = (Config.TradesOnly ? Config.TradesOnly : false) || (tradesOnly ? tradesOnly : false)
+    if (symbols instanceof Array) {
+      for (const symbol of symbols) {
+        if (!this._channels.has(symbol)){
+          this._join(symbol, _tradesOnly)
+        }
+      }
+    }
+    else if (symbols instanceof String) {
+      if (!this._channels.has(symbols)){
+        this._join(symbols, _tradesOnly)
+      }
+    }
+    else {
+      for (const symbol of Config.Symbols) {
+        if (!this._channels.has(symbol)){
+          this._join(symbol, _tradesOnly)
+        }
       }
     }
   } 
-  
-  async join(symbol, tradesOnly) {
-    while (!this._isReady) {
-      await sleep(1000)
-    }
-    let _tradesOnly = (Config.TradesOnly ? Config.TradesOnly : false) || tradesOnly
-    if (!this._channels.has(symbol)){
-      this._join(symbol, _tradesOnly)
-    }
-  }
-
-  join(symbols, tradesOnly) {
-    while (!this._isReady) {
-      await sleep(1000)
-    }
-    let _tradesOnly = (Config.TradesOnly ? Config.TradesOnly : false) || tradesOnly
-    for (const symbol of symbols) {
-      if (!this._channels.has(symbol)){
-        this._join(symbol, _tradesOnly)
-      }
-    }
-  }
-
-  leave() {
-    for (const [channel, tradesOnly] of this._channels) {
-      this._leave(channel, tradesOnly)
-    }
-  }
-
-  leave(symbol) {
-    if (this._channels.has(symbol)) {
-      this._leave(symbol, this._channels.get(symbol))
-    }
-  }
 
   leave(symbols) {
-    for (const symbol of symbols) {
-      if (this._channels.has(symbol)) {
-        this._leave(symbol, this._channels.get(symbol))
+    if (symbols instanceof Array) {
+      for (const symbol of symbols) {
+        if (this._channels.has(symbol)) {
+          this._leave(symbol)
+        }
+      }
+    }
+    else if (symbols instanceof String) {
+      if (this._channels.has(symbols)) {
+        this._leave(symbols)
+      }
+    }
+    else {
+      for (const channel of this._channels.keys()) {
+        this._leave(channel)
       }
     }
   }
 
-  stop() {
-    clearInterval(this._heartbeat)
+  async stop() {
     this._isReady = false
+    this._doReconnect = false
+    console.log("Intrinio Realtime Client - Leaving subscribed channels")
     for (const channel of this._channels.keys()) {
       this._leave(channel)
+    }
+    while (this._websocket.bufferedAmount > 0) {
+      await sleep(500)
     }
     console.log("Intrinio Realtime Client - Websocket closing")
     if (this._websocket) {
       this._websocket.close(1000, "Terminated by client")
     }
-    console.log("Intrinio Realtime Client - Websocket closed")
   }
 
   getTotalMsgCount() {

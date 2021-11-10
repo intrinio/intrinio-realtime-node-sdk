@@ -1,7 +1,5 @@
 {
-	"Config": {
-		"ApiKey": "OjEyOTk1MzNkMjEwZmY4MmYxNTRiMzhhYmY3NWIwOGYy",
-		"Provider": "REALTIME",
-		"Symbols": [ "AAPL", "MSFT", "GOOG" ]
-	}
+	"ApiKey": "OjEyOTk1MzNkMjEwZmY4MmYxNTRiMzhhYmY3NWIwOGYy",
+	"Provider": "REALTIME",
+	"Symbols": [ "AAPL", "MSFT", "GOOG" ]
 }
