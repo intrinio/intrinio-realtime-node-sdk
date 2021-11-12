@@ -2,9 +2,9 @@
 
 const { log } = require('console')
 const https = require('https')
+const { config } = require('process')
 const Promise = require('promise')
 const WebSocket = require('ws')
-const Config = require('./config.json')
 
 const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000]
@@ -13,8 +13,30 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+async function _doBackoff(context, booleanCallback) {
+  let i = 0
+  let backoff = SELF_HEAL_BACKOFFS[i]
+  let success = await booleanCallback.call(context)
+  while (!success) {
+    await sleep(backoff)
+    i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1)
+    backoff = SELF_HEAL_BACKOFFS[i]
+    success = await booleanCallback.call(context)
+  }
+}
+
+const defaultConfig = {
+  isPublicKey: false,
+  ipAddress: undefined,
+  symbols: undefined,
+  tradesOnly: false
+}
+
 class IntrinioRealtime {
-  constructor(onTrade, onQuote) {
+  constructor(accessKey, provider, onTrade, onQuote, config = {}) {
+    this._accessKey = accessKey
+    this._provider = provider
+    this._config = Object.assign(defaultConfig, config)
     this._token = null
     this._tokenTime = null
     this._websocket = null
@@ -27,79 +49,75 @@ class IntrinioRealtime {
     this._onTrade = (onTrade && (typeof onTrade === "function")) ? onTrade : (_) => {}
     this._onQuote = (onQuote && (typeof onQuote === "function")) ? onQuote : (_) => {}
 
-    if (!Config) {
-      throw "Intrinio Realtime Client - config.json not found"
+    if ((!this._accessKey) || (this._accessKey === "")) {
+      throw "Intrinio Realtime Client - Access Key is required"
     }
 
-    if ((!Config.ApiKey) || (Config.ApiKey === "")) {
-      throw "Intrinio Realtime Client - API Key is required"
-    }
-
-    if (!Config.Provider) {
+    if (!this._provider) {
       throw "Intrinio Realtime Client - 'Provider' must be specified"
     }
-    else if ((Config.Provider !== "REALTIME") && (Config.Provider !== "MANUAL")) {
+    else if ((this._provider !== "REALTIME") && (this._provider !== "MANUAL")) {
       throw "Intrinio Realtime Client - 'Provider' must be either 'REALTIME' or 'MANUAL'"
     }
 
-    if ((Config.Provider === "MANUAL") && ((!Config.IPAddress) || (Config.IPAddress === ""))) {
+    if ((this._provider === "MANUAL") && ((!this._config.ipAddress) || (this._config.ipAddress === ""))) {
       throw "Intrinio Realtime Client - 'IPAddress' must be specified for manual configuration"
     }
 
-    process.on("SIGINT", () => {
-      console.log("Intrinio Realtime Client - Shutdown detected")
-      this.stop()})
-
     this._trySetToken().then(
       () => {this._resetWebsocket().then(
-        () => {console.log("Intrinio Realtime Client - Startup succeeded")},
+        () => {
+          console.log("Intrinio Realtime Client - Startup succeeded")
+          process.on("SIGINT", () => {
+            console.log("Intrinio Realtime Client - Shutdown detected")
+            this.stop()})},
         () => {console.error("Intrinio Realtime Client - Startup failed. Unable to establish websocket connection.")})},
       () => {console.error("Intrinio Realtime Client - Startup failed. Unable to acquire auth token.")})
   }
 
   _getAuthUrl() {
-    switch(Config.Provider) {
-      case "REALTIME": return "https://realtime-mx.intrinio.com/auth?api_key=" + Config.ApiKey
-      case "MANUAL": return "http://" + Config.IPAddress + "/auth?api_key=" + Config.ApiKey
+    switch(this._provider) {
+      case "REALTIME": return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey
+      case "MANUAL": return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
       default: throw "Intrinio Realtime Client - 'Provider' not specified!"
     }
   }
 
   _getWebSocketUrl() {
-    switch(Config.Provider) {
+    switch(this._provider) {
       case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
-      case "MANUAL": return "ws://" + Config.IPAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token
+      case "MANUAL": return "ws://" + this._config.ipAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token
       default: throw "Intrinio Realtime Client - 'Provider' not specified!"
     }
   }
 
   _parseTrade (buffer, symbolLength) {
     return {
-      Symbol: buffer.toString("ascii", 2, symbolLength),
-      Price: float (buffer.readInt32LE(2 + symbolLength)) / 10000.0,
+      Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
+      Price: buffer.readInt32LE(2 + symbolLength) / 10000.0,
       Size: buffer.readUInt32LE(6 + symbolLength),
-      Timestamp: buffer.readUInt64LE(10 + symbolLength),
+      Timestamp: buffer.readBigUInt64LE(10 + symbolLength),
       TotalVolume: buffer.readUInt32LE(18 + symbolLength)
     }
   }
 
   _parseQuote (buffer, symbolLength) {
     return {
-      Type: int(buffer[0]),
-      Symbol: buffer.toString("ascii", 2, symbolLength),
+      Type: buffer[0],
+      Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
       Price: float(buffer.readInt32LE(2 + symbolLength)) / 10000.0,
       Size: buffer.readUInt32LE(6 + symbolLength),
-      Timestamp: buffer.readUInt64LE(10 + symbolLength)
+      Timestamp: buffer.readBigUInt64LE(10 + symbolLength)
     }
   }
 
   _parseSocketMessage(bytes) {
     let buffer = Buffer.from(bytes)
-    let msgCount = int(buffer[0])
+    let msgCount = buffer[0]
     let startIndex = 1
     for (let i = 0; i < msgCount; i++) {
-      let msgType = int(buffer[startIndex])
-      let symbolLength = int(buffer[startIndex + 1])
+      let msgType = buffer[startIndex]
+      let symbolLength = buffer[startIndex + 1]
       let endIndex = startIndex + symbolLength
       let chunk = null
       switch(msgType) {
@@ -123,24 +141,6 @@ class IntrinioRealtime {
     }
   }
 
-  _heartbeatFn() {
-    if ((this._websocket) && (this._isReady)) {
-      this._websocket.send("")
-    }
-  }
-
-  async _doBackoff(booleanCallback) {
-    let i = 0
-    let backoff = SELF_HEAL_BACKOFFS[i]
-    let success = await booleanCallback()
-    while (!success) {
-      await sleep(backoff)
-      i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1)
-      backoff = SELF_HEAL_BACKOFFS[i]
-      success = await booleanCallback()
-    }
-  }
-
   _trySetToken() {
     return new Promise((fulfill, reject) => {
       console.log("Intrinio Realtime Client - Authorizing...")
@@ -157,6 +157,7 @@ class IntrinioRealtime {
         else {
           response.on("data", data => {
               this._token = Buffer.from(data).toString("utf8")
+              this._tokenTime = Date.now()
               console.log("Intrinio Realtime Client - Authorized")
               fulfill(true)
           })
@@ -232,7 +233,11 @@ class IntrinioRealtime {
         console.log("Intrinio Realtime Client - Websocket connected")
         if (!self._heartbeat) {
           console.log("Intrinio Realtime Client - Starting heartbeat")
-          self._heartbeat = setInterval(self._heartbeatFn, HEARTBEAT_INTERVAL)
+          self._heartbeat = setInterval(() => {
+            if ((self._websocket) && (self._isReady)) {
+              this._websocket.send("")
+            }
+          }, HEARTBEAT_INTERVAL)
         }
         if (self._channels.size > 0) {
           for (const [channel, tradesOnly] of self._channels) {
@@ -251,7 +256,7 @@ class IntrinioRealtime {
         self._heartbeat = null
         console.info("Intrinio Realtime Client - Websocket closed (%o: %s)", code, reason)
         if (self._doReconnect) {
-          self._tryReconnect()
+          self._doBackoff(self, self._reconnectFn)
         }
       })
       self._websocket.on("error", (error) => {
@@ -277,10 +282,6 @@ class IntrinioRealtime {
     }
   }
 
-  _tryReconnect() {
-    this._doBackoff(this._reconnectFn)
-  }
-
   _join(symbol, tradesOnly) {
     if (!this._channels.has(symbol)) {
       this._channels.set(symbol, tradesOnly)
@@ -303,7 +304,7 @@ class IntrinioRealtime {
     while (!this._isReady) {
       await sleep(1000)
     }
-    let _tradesOnly = (Config.TradesOnly ? Config.TradesOnly : false) || (tradesOnly ? tradesOnly : false)
+    let _tradesOnly = (this._config.tradesOnly ? this._config.tradesOnly : false) || (tradesOnly ? tradesOnly : false)
     if (symbols instanceof Array) {
       for (const symbol of symbols) {
         if (!this._channels.has(symbol)){
@@ -317,11 +318,14 @@ class IntrinioRealtime {
       }
     }
     else {
-      for (const symbol of Config.Symbols) {
-        if (!this._channels.has(symbol)){
-          this._join(symbol, _tradesOnly)
+      if ((this._config.symbols) && (this._config.symbols instanceof Array)) {
+        for (const symbol of this._config.symbols) {
+          if (!this._channels.has(symbol)){
+            this._join(symbol, _tradesOnly)
+          }
         }
       }
+      else console.error("Intrinio Realtime Client - Symbol list invalid")
     }
   } 
 
