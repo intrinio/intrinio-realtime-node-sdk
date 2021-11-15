@@ -1,8 +1,6 @@
 'use strict'
 
-const { log } = require('console')
 const https = require('https')
-const { config } = require('process')
 const Promise = require('promise')
 const WebSocket = require('ws')
 
@@ -13,15 +11,18 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function _doBackoff(context, booleanCallback) {
+async function doBackoff(context, callback) {
   let i = 0
   let backoff = SELF_HEAL_BACKOFFS[i]
-  let success = await booleanCallback.call(context)
+  let success = true
+  await callback.call(context).catch(() => success = false)
   while (!success) {
+    console.log("Intrinio Realtime Client - Sleeping for %isec", (backoff/1000))
     await sleep(backoff)
     i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1)
     backoff = SELF_HEAL_BACKOFFS[i]
-    success = await booleanCallback.call(context)
+    success = true
+    await callback.call(context).catch(() => success = false)
   }
 }
 
@@ -38,10 +39,9 @@ class IntrinioRealtime {
     this._provider = provider
     this._config = Object.assign(defaultConfig, config)
     this._token = null
-    this._tokenTime = null
     this._websocket = null
     this._isReady = false
-    this._doReconnect = true
+    this._attemptingReconnect = false
     this._lastReset = Date.now()
     this._msgCount = 0
     this._channels = new Map()
@@ -64,8 +64,8 @@ class IntrinioRealtime {
       throw "Intrinio Realtime Client - 'IPAddress' must be specified for manual configuration"
     }
 
-    this._trySetToken().then(
-      () => {this._resetWebsocket().then(
+    doBackoff(this, this._trySetToken).then(
+      () => {doBackoff(this, this._resetWebsocket).then(
         () => {
           console.log("Intrinio Realtime Client - Startup succeeded")
           process.on("SIGINT", () => {
@@ -151,13 +151,12 @@ class IntrinioRealtime {
           reject(false)
         }
         else if (response.statusCode != 200) {
-          console.error("Intrinio Realtime Client - Could not get auth token: Status code " + response.statusCode)
+          console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
           reject(false)
         }
         else {
           response.on("data", data => {
               this._token = Buffer.from(data).toString("utf8")
-              this._tokenTime = Date.now()
               console.log("Intrinio Realtime Client - Authorized")
               fulfill(true)
           })
@@ -168,17 +167,11 @@ class IntrinioRealtime {
         reject(false)
       })
       request.on("error", error => {
-        console.error("Intrinio Realtime Client - Unable to get auth token: "+ error)
+        console.error("Intrinio Realtime Client - Unable to get auth token (%s) ", error.String)
         reject(false)
       })
       request.end()
     })
-  }
-
-  _updateToken() {
-    if (this._tokenTime < (Date.now.getDate() - 1)) {
-      this._doBackoff(this._trySetToken)
-    }
   }
 
   _makeJoinMessage(tradesOnly, symbol) {
@@ -248,16 +241,28 @@ class IntrinioRealtime {
         }
         self._lastReset = Date.now()
         self._isReady = true
+        self._isReconnecting = false
         fulfill(true)
       })
       self._websocket.on("close", (code, reason) => {
-        self._isReady = false
-        clearInterval(self._heartbeat)
-        self._heartbeat = null
-        console.info("Intrinio Realtime Client - Websocket closed (%o: %s)", code, reason)
-        if (self._doReconnect) {
-          self._doBackoff(self, self._reconnectFn)
+        if (!self._attemptingReconnect) {
+          self._isReady = false
+          clearInterval(self._heartbeat)
+          self._heartbeat = null
+          console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code)
+          if (code != 1000) {
+            console.info("Intrinio Realtime Client - Websocket reconnecting...")
+            if (!self._isReady) {
+              self._attemptingReconnect = true
+              if ((Date.now() - self._lastReset) > 86400000) {
+                doBackoff(self, self._trySetToken).then(() => {doBackoff(self, self._resetWebsocket)})
+                this._updateToken()
+              }
+              doBackoff(self, self._resetWebsocket)
+            }
+          }
         }
+        else reject()
       })
       self._websocket.on("error", (error) => {
         console.error("Intrinio Realtime Client - Websocket error: %s", error)
@@ -268,18 +273,6 @@ class IntrinioRealtime {
         self._parseSocketMessage(message)
       })
     })
-  }
-
-  _reconnectFn() {
-    console.info("Intrinio Realtime Client - Websocket reconnecting...")
-    if (this._isReady) true
-    else {
-      this._isReconnecting = true
-      if (this._lastReset < (Date.now.getDate() - 5)) {
-        this._updateToken()
-      }
-      this._resetWebsocket()
-    }
   }
 
   _join(symbol, tradesOnly) {
