@@ -27,16 +27,14 @@ async function doBackoff(context, callback) {
 }
 
 const defaultConfig = {
-  isPublicKey: false,
+  provider: 'REALTIME', 
   ipAddress: undefined,
-  symbols: undefined,
   tradesOnly: false
 }
 
 class IntrinioRealtime {
-  constructor(accessKey, provider, onTrade, onQuote, config = {}) {
+  constructor(accessKey, onTrade, onQuote, config = {}) {
     this._accessKey = accessKey
-    this._provider = provider
     this._config = Object.assign(defaultConfig, config)
     this._token = null
     this._websocket = null
@@ -53,41 +51,51 @@ class IntrinioRealtime {
       throw "Intrinio Realtime Client - Access Key is required"
     }
 
-    if (!this._provider) {
-      throw "Intrinio Realtime Client - 'Provider' must be specified"
+    if (!this._config.provider) {
+      throw "Intrinio Realtime Client - 'config.provider' must be specified"
     }
-    else if ((this._provider !== "REALTIME") && (this._provider !== "MANUAL")) {
-      throw "Intrinio Realtime Client - 'Provider' must be either 'REALTIME' or 'MANUAL'"
+    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")) {
+      throw "Intrinio Realtime Client - 'config.provider' must be either 'REALTIME' or 'MANUAL'"
     }
 
-    if ((this._provider === "MANUAL") && ((!this._config.ipAddress) || (this._config.ipAddress === ""))) {
-      throw "Intrinio Realtime Client - 'IPAddress' must be specified for manual configuration"
+    if ((this._config.provider === "MANUAL") && ((!this._config.ipAddress) || (this._config.ipAddress === ""))) {
+      throw "Intrinio Realtime Client - 'config.ipAddress' must be specified for manual configuration"
+    }
+
+    if(!onTrade) {
+      throw "Intrinio Realtime Client - 'onTrade' callback is required"
+    }
+
+    if(!onQuote){
+      this._config.tradesOnly = true
     }
 
     doBackoff(this, this._trySetToken).then(
       () => {doBackoff(this, this._resetWebsocket).then(
         () => {
           console.log("Intrinio Realtime Client - Startup succeeded")
-          process.on("SIGINT", () => {
+          process.on('SIGINT', () => {
             console.log("Intrinio Realtime Client - Shutdown detected")
-            this.stop()})},
+            this.stop()
+            process.kill(process.pid, 'SIGINT')})
+          },
         () => {console.error("Intrinio Realtime Client - Startup failed. Unable to establish websocket connection.")})},
       () => {console.error("Intrinio Realtime Client - Startup failed. Unable to acquire auth token.")})
   }
 
   _getAuthUrl() {
-    switch(this._provider) {
+    switch(this._config.provider) {
       case "REALTIME": return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey
       case "MANUAL": return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
-      default: throw "Intrinio Realtime Client - 'Provider' not specified!"
+      default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
   }
 
   _getWebSocketUrl() {
-    switch(this._provider) {
+    switch(this._config.provider) {
       case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
       case "MANUAL": return "ws://" + this._config.ipAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token
-      default: throw "Intrinio Realtime Client - 'Provider' not specified!"
+      default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
   }
 
@@ -105,7 +113,7 @@ class IntrinioRealtime {
     return {
       Type: buffer[0],
       Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
-      Price: float(buffer.readInt32LE(2 + symbolLength)) / 10000.0,
+      Price: buffer.readInt32LE(2 + symbolLength) / 10000.0,
       Size: buffer.readUInt32LE(6 + symbolLength),
       Timestamp: buffer.readBigUInt64LE(10 + symbolLength)
     }
@@ -177,7 +185,7 @@ class IntrinioRealtime {
   _makeJoinMessage(tradesOnly, symbol) {
     let message = null
     switch (symbol) {
-      case "lobby":
+      case "$lobby":
         message = Buffer.alloc(11)
         message.writeUInt8(74, 0)
         if (tradesOnly) {
@@ -203,7 +211,7 @@ class IntrinioRealtime {
   _makeLeaveMessage(symbol) {
     let message = null
     switch (symbol) {
-      case "lobby":
+      case "$lobby":
         message = Buffer.alloc(10)
         message.writeUInt8(76, 0)
         message.write("$FIREHOSE", 1, "ascii")
@@ -276,6 +284,9 @@ class IntrinioRealtime {
   }
 
   _join(symbol, tradesOnly) {
+    if (this._channels.has("$lobby")) {
+      console.warn("Intrinio Realtime Client - $lobby channel already joined. Other channels not necessary.")
+    }
     if (!this._channels.has(symbol)) {
       this._channels.set(symbol, tradesOnly)
       let message = this._makeJoinMessage(tradesOnly, symbol)
@@ -305,22 +316,18 @@ class IntrinioRealtime {
         }
       }
     }
-    else if (symbols instanceof String) {
+    else if (typeof symbols === "string") {
       if (!this._channels.has(symbols)){
         this._join(symbols, _tradesOnly)
       }
     }
-    else {
-      if ((this._config.symbols) && (this._config.symbols instanceof Array)) {
-        for (const symbol of this._config.symbols) {
-          if (!this._channels.has(symbol)){
-            this._join(symbol, _tradesOnly)
-          }
-        }
-      }
-      else console.error("Intrinio Realtime Client - Symbol list invalid")
+    else if ((typeof tradesOnly !== "undefined") || (typeof tradesOnly !== "boolean")) {
+      console.error("Intrinio Realtime Client - If provided, 'tradesOnly' must be of type 'boolean', not '%s'", typeof tradesOnly)
     }
-  } 
+    else {
+        console.error("Intrinio Realtime Client - Invalid use of 'join'")
+    }
+  }
 
   leave(symbols) {
     if (symbols instanceof Array) {
@@ -330,14 +337,19 @@ class IntrinioRealtime {
         }
       }
     }
-    else if (symbols instanceof String) {
+    else if (typeof symbols === "string") {
       if (this._channels.has(symbols)) {
         this._leave(symbols)
       }
     }
     else {
-      for (const channel of this._channels.keys()) {
-        this._leave(channel)
+      if (arguments.length == 0) {
+        for (const channel of this._channels.keys()) {
+          this._leave(channel)
+        }
+      }
+      else {
+        console.error("Intrinio Realtime Client - Invalid use of 'leave'")
       }
     }
   }
@@ -359,7 +371,7 @@ class IntrinioRealtime {
   }
 
   getTotalMsgCount() {
-    this._msgCount
+    return this._msgCount
   }
 }
 
