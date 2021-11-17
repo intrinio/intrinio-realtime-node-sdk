@@ -1,6 +1,6 @@
 "use strict"
 const Client = require("./index")
-const accessKey = "OjEyOTk1MzNkMjEwZmY4MmYxNTRiMzhhYmY3NWIwOGYy"
+const accessKey = ""
 
 let trades = new Map()
 let quotes = new Map()
