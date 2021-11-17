@@ -3,572 +3,375 @@
 const https = require('https')
 const Promise = require('promise')
 const WebSocket = require('ws')
-const EventEmitter = require('events').EventEmitter
 
-const HEARTBEAT_INTERVAL = 1000 * 3 // 3 seconds
-const SELF_HEAL_BACKOFFS = [0,100,500,1000,2000]
-const WS_CLOSE_REASON_USER = 1000
+const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
+const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000]
 
-class IntrinioRealtime extends EventEmitter {
-  constructor(options) {
-    super()
-    
-    this.options = options
-    this.token = null
-    this.websocket = null
-    this.ready = false
-    this.channels = {}
-    this.joinedChannels = {}
-    this.afterConnected = null // Promise
-    this.self_heal_backoff = Array.from(SELF_HEAL_BACKOFFS)
-    this.self_heal_ref = null
-    this.quote_callback = null
-    this.error_callback = null
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
-    // Parse options
-    if (!options) {
-      this._throw("Need a valid options parameter")
+async function doBackoff(context, callback) {
+  let i = 0
+  let backoff = SELF_HEAL_BACKOFFS[i]
+  let success = true
+  await callback.call(context).catch(() => success = false)
+  while (!success) {
+    console.log("Intrinio Realtime Client - Sleeping for %isec", (backoff/1000))
+    await sleep(backoff)
+    i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1)
+    backoff = SELF_HEAL_BACKOFFS[i]
+    success = true
+    await callback.call(context).catch(() => success = false)
+  }
+}
+
+const defaultConfig = {
+  provider: 'REALTIME', 
+  ipAddress: undefined,
+  tradesOnly: false
+}
+
+class IntrinioRealtime {
+  constructor(accessKey, onTrade, onQuote, config = {}) {
+    this._accessKey = accessKey
+    this._config = Object.assign(defaultConfig, config)
+    this._token = null
+    this._websocket = null
+    this._isReady = false
+    this._attemptingReconnect = false
+    this._lastReset = Date.now()
+    this._msgCount = 0
+    this._channels = new Map()
+    this._heartbeat = null
+    this._onTrade = (onTrade && (typeof onTrade === "function")) ? onTrade : (_) => {}
+    this._onQuote = (onQuote && (typeof onQuote === "function")) ? onQuote : (_) => {}
+
+    if ((!this._accessKey) || (this._accessKey === "")) {
+      throw "Intrinio Realtime Client - Access Key is required"
     }
 
-    if (options.api_key) {
-      if (!this._validAPIKey(options.api_key)) {
-        this._throw("API Key was formatted invalidly")
-      }
+    if (!this._config.provider) {
+      throw "Intrinio Realtime Client - 'config.provider' must be specified"
     }
-    else {
-      if (!options.username && !options.password) {
-        this._throw("API key or username and password are required")
-      }
-
-      if (!options.username) {
-        this._throw("Need a valid username")
-      }
-
-      if (!options.password) {
-        this._throw("Need a valid password")
-      }
-    }
-    
-    var providers = ["iex", "quodd", "cryptoquote", "fxcm"]
-    if (!options.provider || !providers.includes(options.provider)) {
-      this._throw("Need a valid provider: iex, quodd, cryptoquote, or fxcm")
+    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")) {
+      throw "Intrinio Realtime Client - 'config.provider' must be either 'REALTIME' or 'MANUAL'"
     }
 
-    // Establish connection
-    this._connect()
+    if ((this._config.provider === "MANUAL") && ((!this._config.ipAddress) || (this._config.ipAddress === ""))) {
+      throw "Intrinio Realtime Client - 'config.ipAddress' must be specified for manual configuration"
+    }
 
-    // Send heartbeat at intervals
-    this.heartbeat_ref = setInterval(()=> {
-      this._heartbeat()
-    }, HEARTBEAT_INTERVAL)
+    if(!onTrade) {
+      throw "Intrinio Realtime Client - 'onTrade' callback is required"
+    }
+
+    if(!onQuote){
+      this._config.tradesOnly = true
+    }
+
+    doBackoff(this, this._trySetToken).then(
+      () => {doBackoff(this, this._resetWebsocket).then(
+        () => {
+          console.log("Intrinio Realtime Client - Startup succeeded")
+          process.on('SIGINT', () => {
+            console.log("Intrinio Realtime Client - Shutdown detected")
+            this.stop()
+            process.kill(process.pid, 'SIGINT')})
+          },
+        () => {console.error("Intrinio Realtime Client - Startup failed. Unable to establish websocket connection.")})},
+      () => {console.error("Intrinio Realtime Client - Startup failed. Unable to acquire auth token.")})
   }
 
-  _log(...parts) {
-    var message = "IntrinioRealtime | "
-    parts.forEach(part => {
-      if (typeof part === 'object') { part = JSON.stringify(part) }
-      message += part
-    })
-    console.log(message)
-  }
-
-  _debug(...parts) {
-    if (this.options.debug) {
-      this._log(...parts)
-    }
-  }
-
-  _throw(e) {
-    let handled = false
-    if (typeof e === 'string') {
-      e = "IntrinioRealtime | " + e
-    }
-    if (typeof this.error_callback === 'function') {
-      this.error_callback(e)
-      handled = true
-    }
-    if (this.listenerCount('error') > 0) {
-      this.emit('error', e)
-      handled = true
-    }
-    if (!handled) {
-      throw e
+  _getAuthUrl() {
+    switch(this._config.provider) {
+      case "REALTIME": return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey
+      case "MANUAL": return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
+      default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
   }
 
-  _connect() {
-    this._debug("Connecting...")
-
-    this.afterConnected = new Promise((fulfill, reject) => {
-      this._refreshToken().then(() => {
-        this._refreshWebsocket().then(() => {
-          fulfill()
-        }, reject)
-      }, reject)
-    })
-
-    this.afterConnected.done(() => {
-      this.ready = true
-      this.emit('connect')
-      this._stopSelfHeal()
-      if (["iex", "cryptoquote", "fxcm"].includes(this.options.provider)) {
-        this._refreshChannels() 
-      }
-    },
-    () => {
-      this.ready = false
-      this._trySelfHeal()
-    })
-
-    return this.afterConnected
-  }
-  
-  _makeAuthUrl() {
-    var auth_url = {
-      host: "",
-      path: ""
+  _getWebSocketUrl() {
+    switch(this._config.provider) {
+      case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
+      case "MANUAL": return "ws://" + this._config.ipAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token
+      default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
-
-    if (this.options.provider == "iex") {
-      auth_url = {
-        host: "realtime.intrinio.com",
-        path: "/auth"
-      }
-    }
-    else if (this.options.provider == "quodd") {
-      auth_url = {
-        host: "api.intrinio.com",
-        path: "/token?type=QUODD"
-      }
-    }
-    else if (this.options.provider == "cryptoquote") {
-      auth_url = {
-        host: "crypto.intrinio.com",
-        path: "/auth"
-      }
-    }
-    else if (this.options.provider == "fxcm") {
-      auth_url = {
-        host: "fxcm.intrinio.com",
-        path: "/auth"
-      }
-    }
-
-    if (this.options.api_key) {
-      auth_url = this._makeAPIAuthUrl(auth_url)
-    }
-
-    return auth_url
   }
 
-  _makeAPIAuthUrl(auth_url) {
-    var path = auth_url.path
-
-    if (path.includes("?")) {
-      path = path + "&"
+  _parseTrade (buffer, symbolLength) {
+    return {
+      Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
+      Price: buffer.readInt32LE(2 + symbolLength) / 10000.0,
+      Size: buffer.readUInt32LE(6 + symbolLength),
+      Timestamp: buffer.readBigUInt64LE(10 + symbolLength),
+      TotalVolume: buffer.readUInt32LE(18 + symbolLength)
     }
-    else {
-      path = path + "?"
-    }
-
-    auth_url.path = path + "api_key=" + this.options.api_key
-    return auth_url
   }
 
-  _makeHeaders() {
-    if (this.options.api_key) {
-      return {
-        'Content-Type': 'application/json'
-      }
+  _parseQuote (buffer, symbolLength) {
+    return {
+      Type: buffer[0],
+      Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
+      Price: buffer.readInt32LE(2 + symbolLength) / 10000.0,
+      Size: buffer.readUInt32LE(6 + symbolLength),
+      Timestamp: buffer.readBigUInt64LE(10 + symbolLength)
     }
-    else {
-      var { username, password } = this.options
+  }
 
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': 'Basic ' + new Buffer((username + ':' + password)).toString('base64')
+  _parseSocketMessage(bytes) {
+    let buffer = Buffer.from(bytes)
+    let msgCount = buffer[0]
+    let startIndex = 1
+    for (let i = 0; i < msgCount; i++) {
+      let msgType = buffer[startIndex]
+      let symbolLength = buffer[startIndex + 1]
+      let endIndex = startIndex + symbolLength
+      let chunk = null
+      switch(msgType) {
+        case 0:
+          endIndex = endIndex + 22
+          chunk = buffer.subarray(startIndex, endIndex)
+          let trade = this._parseTrade(chunk, symbolLength)
+          startIndex = endIndex
+          this._onTrade(trade)
+          break;
+        case 1:
+        case 2:
+          endIndex = endIndex + 18
+          chunk = buffer.subarray(startIndex, endIndex)
+          let quote = this._parseQuote(chunk, symbolLength)
+          startIndex = endIndex
+          this._onQuote(quote)
+          break;
+        default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType)
       }
     }
   }
 
-  _refreshToken() {
-    this._debug("Requesting auth token...")
-
+  _trySetToken() {
     return new Promise((fulfill, reject) => {
-      var agent = this.options.agent || false
-      var { host, path } = this._makeAuthUrl()
-      var headers = this._makeHeaders()
-
-      // Get token
-      var options = {
-        host: host,
-        path: path,
-        agent: agent,
-        headers: headers
-      }
-      
-      var req = https.get(options, res => {
-        if (res.statusCode == 401) {
-          this._throw("Unable to authorize")
-          reject()
+      console.log("Intrinio Realtime Client - Authorizing...")
+      let url = this._getAuthUrl()
+      let request = https.get(url, response => {
+        if (response.statusCode == 401) {
+          console.error("Intrinio Realtime Client - Unable to authorize")
+          reject(false)
         }
-        else if (res.statusCode != 200) {
-          console.error("IntrinioRealtime | Could not get auth token: Status code " + res.statusCode)
-          reject()
+        else if (response.statusCode != 200) {
+          console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
+          reject(false)
         }
         else {
-          res.on('data', data => {
-            this.token = new Buffer(data, 'base64').toString()
-            this._debug("Received auth token!")
-            fulfill()
+          response.on("data", data => {
+              this._token = Buffer.from(data).toString("utf8")
+              console.log("Intrinio Realtime Client - Authorized")
+              fulfill(true)
           })
         }
       })
-
-      req.on('error', (e) => {
-        console.error("IntrinioRealtime | Could not get auth token: " + e)
-        reject(e)
+      request.on("timeout", () => {
+        console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
+        reject(false)
       })
-
-      req.end()
+      request.on("error", error => {
+        console.error("Intrinio Realtime Client - Unable to get auth token (%s) ", error.String)
+        reject(false)
+      })
+      request.end()
     })
   }
 
-  _makeSocketUrl() {
-    if (this.options.provider == "iex") {
-      return 'wss://realtime.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
-    }
-    else if (this.options.provider == "quodd") {
-      return 'wss://www5.quodd.com/websocket/webStreamer/intrinio/' + encodeURIComponent(this.token)
-    }
-    else if (this.options.provider == "cryptoquote") {
-      return 'wss://crypto.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
-    }
-    else if (this.options.provider == "fxcm") {
-      return 'wss://fxcm.intrinio.com/socket/websocket?vsn=1.0.0&token=' + encodeURIComponent(this.token)
+  _makeJoinMessage(tradesOnly, symbol) {
+    let message = null
+    switch (symbol) {
+      case "$lobby":
+        message = Buffer.alloc(11)
+        message.writeUInt8(74, 0)
+        if (tradesOnly) {
+          message.writeUInt8(1, 1)
+        } else {
+          message.writeUInt8(0, 1)
+        }
+        message.write("$FIREHOSE", 2, "ascii")
+        return message
+      default:
+        message = Buffer.alloc(2 + symbol.length)
+        message.writeUInt8(74, 0)
+        if (tradesOnly) {
+          message.writeUInt8(1, 1)
+        } else {
+          message.writeUInt8(0, 1)
+        }
+        message.write(symbol, 2, "ascii")
+        return message
     }
   }
-  
-  _refreshWebsocket() {
-    this._debug("Establishing websocket...")
 
+  _makeLeaveMessage(symbol) {
+    let message = null
+    switch (symbol) {
+      case "$lobby":
+        message = Buffer.alloc(10)
+        message.writeUInt8(76, 0)
+        message.write("$FIREHOSE", 1, "ascii")
+        return message
+      default:
+        message = Buffer.alloc(1 + symbol.length)
+        message.writeUInt8(76, 0)
+        message.write(symbol, 1, "ascii")
+        return message
+    }
+  }
+
+  _resetWebsocket() {
+    const self = this
     return new Promise((fulfill, reject) => {
-      if (this.websocket) {
-        this.websocket.close(WS_CLOSE_REASON_USER, "User terminated")
-      }
-
-      var socket_url = this._makeSocketUrl()
-      this.websocket = new WebSocket(socket_url, {perMessageDeflate: false, agent: this.options.agent})
-
-      this.websocket.on('open', () => {
-        this._debug("Websocket connected!")
-        fulfill()
+      console.info("Intrinio Realtime Client - Websocket initializing")
+      let wsUrl = self._getWebSocketUrl()
+      self._websocket = new WebSocket(wsUrl, {perMessageDeflate: false})
+      self._websocket.on("open", () => {
+        console.log("Intrinio Realtime Client - Websocket connected")
+        if (!self._heartbeat) {
+          console.log("Intrinio Realtime Client - Starting heartbeat")
+          self._heartbeat = setInterval(() => {
+            if ((self._websocket) && (self._isReady)) {
+              this._websocket.send("")
+            }
+          }, HEARTBEAT_INTERVAL)
+        }
+        if (self._channels.size > 0) {
+          for (const [channel, tradesOnly] of self._channels) {
+            let message = self._makeJoinMessage(tradesOnly, channel)
+            console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
+            self._websocket.send(message)
+          }
+        }
+        self._lastReset = Date.now()
+        self._isReady = true
+        self._isReconnecting = false
+        fulfill(true)
       })
-
-      this.websocket.on('close', (code, reason) => {
-        this._debug("Websocket closed!")
-        if (code != WS_CLOSE_REASON_USER) {
-          this.joinedChannels = {}
-          this._trySelfHeal()
+      self._websocket.on("close", (code, reason) => {
+        if (!self._attemptingReconnect) {
+          self._isReady = false
+          clearInterval(self._heartbeat)
+          self._heartbeat = null
+          console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code)
+          if (code != 1000) {
+            console.info("Intrinio Realtime Client - Websocket reconnecting...")
+            if (!self._isReady) {
+              self._attemptingReconnect = true
+              if ((Date.now() - self._lastReset) > 86400000) {
+                doBackoff(self, self._trySetToken).then(() => {doBackoff(self, self._resetWebsocket)})
+                this._updateToken()
+              }
+              doBackoff(self, self._resetWebsocket)
+            }
+          }
         }
+        else reject()
       })
-
-      this.websocket.on('error', e => {
-        console.error("IntrinioRealtime | Websocket error: " + e)
-        this.joinedChannels = {}
-        reject(e)
+      self._websocket.on("error", (error) => {
+        console.error("Intrinio Realtime Client - Websocket error: %s", error)
+        reject(false)
       })
-
-      this.websocket.on('message', (data, flags) => {
-        try {
-          var message = JSON.parse(data)
-        }
-        catch (e) {
-          this._debug('Non-quote message: ', data)
-          return
-        }
-
-        var quote = null
-
-        if (message.event == "phx_reply" && message.payload.status == "error") {
-          var error = message.payload.response
-          console.error("IntrinioRealtime | Websocket data error: " + error)
-          this._throw(error)
-        }
-        else if (this.options.provider == "iex") {
-          if (message.event === 'quote') {
-            quote = message.payload
-          }
-        }
-        else if (this.options.provider == "quodd") {
-          if (message.event === 'info' && message.data.message === 'Connected') {
-            this._refreshChannels()
-          }
-          else if (message.event === 'quote' || message.event == 'trade') {
-            quote = message.data
-          }
-        }
-        else if (this.options.provider == "cryptoquote") {
-          if (message.event === 'book_update' || message.event === 'ticker' || message.event === 'trade') {
-            quote = message.payload
-          }
-        }
-        else if (this.options.provider == "fxcm") {
-          if (message.event === 'price_update') {
-            quote = message.payload
-          }
-        }
-        
-        if (quote) {
-          if (typeof this.quote_callback === 'function') {
-            this.quote_callback(quote)
-          }
-          this.emit('quote', quote)
-          this._debug('Quote: ', quote)
-        }
-        else {
-          this._debug('Non-quote message: ', data)
-        }
+      self._websocket.on("message", (message) => {
+        self._msgCount++
+        self._parseSocketMessage(message)
       })
     })
   }
 
-  _trySelfHeal() {
-    this._log("No connection! Retrying...")
-
-    var time = this.self_heal_backoff[0]
-    if (this.self_heal_backoff.length > 1) {
-      time = this.self_heal_backoff.shift()
+  _join(symbol, tradesOnly) {
+    if (this._channels.has("$lobby")) {
+      console.warn("Intrinio Realtime Client - $lobby channel already joined. Other channels not necessary.")
     }
-
-    if (this.self_heal_ref) { clearTimeout(this.self_heal_ref) }
-
-    this.self_heal_ref = setTimeout(() => {
-      this._connect()
-    }, time)
-  }
-
-  _stopSelfHeal() {
-    this.self_heal_backoff = Array.from(SELF_HEAL_BACKOFFS)
-
-    if (this.self_heal_ref) {
-      clearTimeout(this.self_heal_ref)
-      this.self_heal_ref = null
+    if (!this._channels.has(symbol)) {
+      this._channels.set(symbol, tradesOnly)
+      let message = this._makeJoinMessage(tradesOnly, symbol)
+      console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", symbol, tradesOnly)
+      this._websocket.send(message)
     }
   }
 
-  _refreshChannels() {
-    if (!this.ready) {
-      return
-    }
-    
-    // Join new channels
-    for (var channel in this.channels) {
-      if (!this.joinedChannels[channel]) {
-        this.websocket.send(JSON.stringify(this._makeJoinMessage(channel)))
-        this._debug('Joined channel: ', channel)
-      }
-    }
-    
-    // Leave old channels
-    for (var channel in this.joinedChannels) {
-      if (!this.channels[channel]) {
-        this.websocket.send(JSON.stringify(this._makeLeaveMessage(channel)))
-        this._debug('Left channel: ', channel)
-      }
-    }
-    
-    this.joinedChannels = {}
-    for (var channel in this.channels) {
-      this.joinedChannels[channel] = true
+  _leave(symbol) {
+    if (this._channels.has(symbol)) {
+      this._channels.delete(symbol)
+      let message = this._makeLeaveMessage(symbol)
+      console.info("Intrinio Realtime Client - Leaving channel: %s", symbol)
+      this._websocket.send(message)
     }
   }
 
-  _makeHeartbeatMessage() {
-    if (this.options.provider == "quodd") {
-      return {event: 'heartbeat', data: {action: 'heartbeat', ticker: Date.now()}}
+  async join(symbols, tradesOnly) {
+    while (!this._isReady) {
+      await sleep(1000)
     }
-    else if (["iex", "cryptoquote", "fxcm"].includes(this.options.provider)) {
-      return {topic: 'phoenix', event: 'heartbeat', payload: {}, ref: null}
-    }
-  }
-
-  _heartbeat() {
-    this.afterConnected.then(() => {
-      var message = JSON.stringify(this._makeHeartbeatMessage())
-      this._debug("Heartbeat: ", message)
-      this.websocket.send(message)
-    })
-  }
-
-  _parseChannels(args) {
-    var channels = []
-
-    args.forEach(arg => {
-      if (Array.isArray(arg)) {
-        arg.forEach(sub_arg => {
-          if (typeof sub_arg === 'string') {
-            channels.push(sub_arg.trim())
-          }
-          else {
-            this._throw("Invalid channel provided")
-          }
-        })
-      }
-      else if (typeof arg === 'string') {
-        channels.push(arg.trim())
-      }
-      else {
-        this._throw("Invalid channel provided")
-      }
-    })
-
-    channels.forEach(channel => {
-      if (channel.length == 0) {
-        this._throw("Invalid channel provided")
-      }
-    })
-
-    return channels
-  }
-  
-  _makeJoinMessage(channel) {
-    if (this.options.provider == "iex") {
-      return {
-        topic: this._parseIexTopic(channel),
-        event: 'phx_join',
-        payload: {},
-        ref: null
-      }
-    }
-    else if (this.options.provider == "quodd") {
-      return {
-        event: "subscribe",
-        data: {
-          ticker: channel,
-          action: "subscribe"
+    let _tradesOnly = (this._config.tradesOnly ? this._config.tradesOnly : false) || (tradesOnly ? tradesOnly : false)
+    if (symbols instanceof Array) {
+      for (const symbol of symbols) {
+        if (!this._channels.has(symbol)){
+          this._join(symbol, _tradesOnly)
         }
       }
     }
-    else if (["cryptoquote", "fxcm"].includes(this.options.provider)) {
-      return {
-        topic: channel,
-        event: 'phx_join',
-        payload: {},
-        ref: null
+    else if (typeof symbols === "string") {
+      if (!this._channels.has(symbols)){
+        this._join(symbols, _tradesOnly)
       }
     }
-  }
-  
-  _makeLeaveMessage(channel) {
-    if (this.options.provider == "iex") {
-      return {
-        topic: this._parseIexTopic(channel),
-        event: 'phx_leave',
-        payload: {},
-        ref: null
-      }
-    }
-    else if (this.options.provider == "quodd") {
-      return {
-        event: "unsubscribe",
-        data: {
-          ticker: channel,
-          action: "unsubscribe"
-        }
-      }
-    }
-    else if (["cryptoquote", "fxcm"].includes(this.options.provider)) {
-      return {
-        topic: channel,
-        event: 'phx_leave',
-        payload: {},
-        ref: null
-      }
-    }
-  }
-
-  _parseIexTopic(channel) {
-    var topic = null
-    if (channel == "$lobby") {
-      topic = "iex:lobby"
-    }
-    else if (channel == "$lobby_last_price") {
-      topic = "iex:lobby:last_price"
+    else if ((typeof tradesOnly !== "undefined") || (typeof tradesOnly !== "boolean")) {
+      console.error("Intrinio Realtime Client - If provided, 'tradesOnly' must be of type 'boolean', not '%s'", typeof tradesOnly)
     }
     else {
-      topic = "iex:securities:" + channel
-    }
-    return topic
-  }
-
-  _validAPIKey(api_key) {
-    if (typeof api_key !== 'string') {
-      return false
-    }
-
-    if (api_key === "") {
-      return false
-    }
-
-    return true
-  }
-
-  destroy() {
-    if (this.token_expiration_ref) {
-      clearInterval(this.token_expiration_ref)
-    }
-
-    if (this.heartbeat_ref) {
-      clearInterval(this.heartbeat_ref)
-    }
-
-    if (this.self_heal_ref) {
-      clearTimeout(this.self_heal_ref)
-    }
-
-    if (this.websocket) {
-      this.websocket.close(WS_CLOSE_REASON_USER, "User terminated")
+        console.error("Intrinio Realtime Client - Invalid use of 'join'")
     }
   }
 
-  onError(callback) {
-    this.error_callback = callback
-  }
-
-  onQuote(callback) {
-    this.quote_callback = callback
-  }
-
-  join(...channels) {
-    var channels = this._parseChannels(channels)
-    channels.forEach(channel => {
-      this.channels[channel] = true
-    })
-    
-    this._refreshChannels()
-  }
-
-  leave(...channels) {
-    var channels = this._parseChannels(channels)
-    channels.forEach(channel => {
-      delete this.channels[channel]
-    })
-    
-    this._refreshChannels()
-  }
-
-  leaveAll() {
-    this.channels = {}
-    this._refreshChannels()
-  }
-
-  listConnectedChannels() {
-    var channels = []
-    for (var channel in this.joinedChannels) {
-      channels.push(channel)
+  leave(symbols) {
+    if (symbols instanceof Array) {
+      for (const symbol of symbols) {
+        if (this._channels.has(symbol)) {
+          this._leave(symbol)
+        }
+      }
     }
-    return channels
+    else if (typeof symbols === "string") {
+      if (this._channels.has(symbols)) {
+        this._leave(symbols)
+      }
+    }
+    else {
+      if (arguments.length == 0) {
+        for (const channel of this._channels.keys()) {
+          this._leave(channel)
+        }
+      }
+      else {
+        console.error("Intrinio Realtime Client - Invalid use of 'leave'")
+      }
+    }
+  }
+
+  async stop() {
+    this._isReady = false
+    this._doReconnect = false
+    console.log("Intrinio Realtime Client - Leaving subscribed channels")
+    for (const channel of this._channels.keys()) {
+      this._leave(channel)
+    }
+    while (this._websocket.bufferedAmount > 0) {
+      await sleep(500)
+    }
+    console.log("Intrinio Realtime Client - Websocket closing")
+    if (this._websocket) {
+      this._websocket.close(1000, "Terminated by client")
+    }
+  }
+
+  getTotalMsgCount() {
+    return this._msgCount
   }
 }
 
