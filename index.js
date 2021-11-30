@@ -1,8 +1,10 @@
 'use strict'
 
-const https = require('https')
 const Promise = require('promise')
 const WebSocket = require('ws')
+
+const Encoder = new TextEncoder()
+const Decoder = new TextDecoder("utf-8")
 
 const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000]
@@ -26,10 +28,78 @@ async function doBackoff(context, callback) {
   }
 }
 
+function readString(bytes, startPos, endPos) {
+  if (startPos < 0) startPos = 0
+  else if (startPos >= bytes.length) return ''
+  else startPos |= 0
+  if (endPos === undefined || endPos > bytes.length) endPos = bytes.length
+  else endPos |= 0
+  if (end <= start) return ''
+  const chunk = bytes.slice(startPos, endPos)
+  //return String.fromCharCode(chunk)
+  Decoder.decode(chunk)
+}
+
+function readInt32(bytes, startPos = 0) {
+  const first = bytes[startPos]
+  const last = bytes[startPos + 3]
+  if (first === undefined || last === undefined)
+    console.error("Intrinio Realtime Client - Cannot read UInt32")
+  return (
+    first +
+    (bytes[++startPos] * 256) +
+    (bytes[++startPos] * 65536) +
+    (last << 24)
+  )
+}
+
+function readUInt32(bytes, startPos = 0) {
+  const first = bytes[startPos]
+  const last = bytes[startPos + 3]
+  if (first === undefined || last === undefined)
+    console.error("Intrinio Realtime Client - Cannot read UInt32")
+  return (
+    first +
+    (bytes[++startPos] * 256) +
+    (bytes[++startPos] * 65536) +
+    (last * 16777216)
+  )
+}
+
+function readUInt64(bytes, startPos = 0) {
+  const first = bytes[startPos]
+  const last = bytes[startPos + 7]
+  if (first === undefined || last === undefined)
+    console.error("Intrinio Realtime Client - Cannot read UInt64")
+  const lower =
+    first +
+    (bytes[++startPos] * 256) +
+    (bytes[++startPos] * 65536) +
+    (bytes[++startPos] * 16777216)
+  const upper =
+    bytes[++startPos]
+    (bytes[++startPos] * 256) +
+    (bytes[++startPos] * 65536) +
+    (last * 16777216)
+  return (BigInt(lower) + (BigInt(upper) << 32))
+}
+
+function writeString(bytes, string, startPos) {
+  if (startPos === undefined || startPos < 0 || startPos > bytes.length - 1) return bytes
+  const encodedString = Encoder.encode(string)
+  const bytesAvailable = bytes.length - startPos
+  if (bytesAvailable < string.length) {
+    const trimmedEncodedString = encodedString.slice(0, bytesAvailable)
+    bytes.set(trimmedEncodedString, startPos)
+  }
+  else bytes.set(encodedString, startPos)
+}
+
 const defaultConfig = {
   provider: 'REALTIME', 
   ipAddress: undefined,
-  tradesOnly: false
+  tradesOnly: false,
+  isPublicKey: false
 }
 
 class IntrinioRealtime {
@@ -85,8 +155,12 @@ class IntrinioRealtime {
 
   _getAuthUrl() {
     switch(this._config.provider) {
-      case "REALTIME": return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey
-      case "MANUAL": return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
+      case "REALTIME":
+        if (this._config.isPublicKey) return "https://realtime-mx.intrinio.com/auth"
+        else return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey
+      case "MANUAL":
+        if (this._config.isPublicKey) return "http://" + this._config.ipAddress + "/auth"
+        else return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
       default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
   }
@@ -99,39 +173,39 @@ class IntrinioRealtime {
     }
   }
 
-  _parseTrade (buffer, symbolLength) {
+  _parseTrade(bytes, symbolLength) {
     return {
-      Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
-      Price: buffer.readInt32LE(2 + symbolLength) / 10000.0,
-      Size: buffer.readUInt32LE(6 + symbolLength),
-      Timestamp: buffer.readBigUInt64LE(10 + symbolLength),
-      TotalVolume: buffer.readUInt32LE(18 + symbolLength)
+      Symbol: readString(bytes, 2, 2 + symbolLength),
+      Price: readInt32(bytes, 2 + symbolLength) / 10000.0,
+      Size: readUInt32(bytes, 6 + symbolLength),
+      Timestamp: readUInt64(bytes, 10 + symbolLength),
+      TotalVolume: readUInt32(bytes, 18 + symbolLength)
     }
   }
 
-  _parseQuote (buffer, symbolLength) {
+  _parseQuote (bytes, symbolLength) {
     return {
-      Type: buffer[0],
-      Symbol: buffer.toString("ascii", 2, 2 + symbolLength),
-      Price: buffer.readInt32LE(2 + symbolLength) / 10000.0,
-      Size: buffer.readUInt32LE(6 + symbolLength),
-      Timestamp: buffer.readBigUInt64LE(10 + symbolLength)
+      Type: bytes[0],
+      Symbol: readString(bytes, 2, 2 + symbolLength),
+      Price: readInt32(bytes, 2 + symbolLength) / 10000.0,
+      Size: readUInt32(bytes, 6 + symbolLength),
+      Timestamp: readUInt64(bytes, 10 + symbolLength)
     }
   }
 
-  _parseSocketMessage(bytes) {
-    let buffer = Buffer.from(bytes)
-    let msgCount = buffer[0]
+  _parseSocketMessage(data) {
+    let bytes = Uint8Array.from(data)
+    let msgCount = bytes[0]
     let startIndex = 1
     for (let i = 0; i < msgCount; i++) {
-      let msgType = buffer[startIndex]
-      let symbolLength = buffer[startIndex + 1]
+      let msgType = bytes[startIndex]
+      let symbolLength = bytes[startIndex + 1]
       let endIndex = startIndex + symbolLength
       let chunk = null
       switch(msgType) {
         case 0:
           endIndex = endIndex + 22
-          chunk = buffer.subarray(startIndex, endIndex)
+          chunk = bytes.slice(startIndex, endIndex)
           let trade = this._parseTrade(chunk, symbolLength)
           startIndex = endIndex
           this._onTrade(trade)
@@ -139,7 +213,7 @@ class IntrinioRealtime {
         case 1:
         case 2:
           endIndex = endIndex + 18
-          chunk = buffer.subarray(startIndex, endIndex)
+          chunk = bytes.slice(startIndex, endIndex)
           let quote = this._parseQuote(chunk, symbolLength)
           startIndex = endIndex
           this._onQuote(quote)
@@ -152,33 +226,30 @@ class IntrinioRealtime {
   _trySetToken() {
     return new Promise((fulfill, reject) => {
       console.log("Intrinio Realtime Client - Authorizing...")
-      let url = this._getAuthUrl()
-      let request = https.get(url, response => {
-        if (response.statusCode == 401) {
-          console.error("Intrinio Realtime Client - Unable to authorize")
-          reject(false)
+      const url = this._getAuthUrl()
+      const xhr = new XMLHttpRequest()
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState === 4) {
+          if (xhr.status === 401) {
+            console.error("Intrinio Realtime Client - Unable to authorize")
+            reject()
+          }
+          else if (xhr.status !== 200) {
+            console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
+            reject()
+          }
+          else {
+            this._token = xhr.responseText
+            console.log("Intrinio Realtime Client - Authorized")
+            fulfill()
+          }
         }
-        else if (response.statusCode != 200) {
-          console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
-          reject(false)
-        }
-        else {
-          response.on("data", data => {
-              this._token = Buffer.from(data).toString("utf8")
-              console.log("Intrinio Realtime Client - Authorized")
-              fulfill(true)
-          })
-        }
-      })
-      request.on("timeout", () => {
-        console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
-        reject(false)
-      })
-      request.on("error", error => {
-        console.error("Intrinio Realtime Client - Unable to get auth token (%s) ", error.String)
-        reject(false)
-      })
-      request.end()
+      }
+      xhr.open("GET", url, true)
+      xhr.overrideMimeType("text/html")
+      xhr.setRequestHeader('Content-Type', 'application/json')
+      if (this._config.isPublicKey) xhr.setRequestHeader('Authorization', 'Public ' + public_key)
+      xhr.send()
     })
   }
 
@@ -186,24 +257,24 @@ class IntrinioRealtime {
     let message = null
     switch (symbol) {
       case "$lobby":
-        message = Buffer.alloc(11)
-        message.writeUInt8(74, 0)
+        message = new Uint8Array(11)
+        message[0] = 74
         if (tradesOnly) {
-          message.writeUInt8(1, 1)
+          message[1] = 1
         } else {
-          message.writeUInt8(0, 1)
+          message[1] = 0
         }
-        message.write("$FIREHOSE", 2, "ascii")
+        writeString(message, "$FIREHOSE", 2)
         return message
       default:
-        message = Buffer.alloc(2 + symbol.length)
-        message.writeUInt8(74, 0)
+        message = new Uint8Array(2 + symbol.length)
+        message[0] = 74
         if (tradesOnly) {
-          message.writeUInt8(1, 1)
+          message[1] = 1
         } else {
-          message.writeUInt8(0, 1)
+          message[1] = 0
         }
-        message.write(symbol, 2, "ascii")
+        writeString(message, symbol, 2)
         return message
     }
   }
@@ -212,14 +283,14 @@ class IntrinioRealtime {
     let message = null
     switch (symbol) {
       case "$lobby":
-        message = Buffer.alloc(10)
-        message.writeUInt8(76, 0)
-        message.write("$FIREHOSE", 1, "ascii")
+        message = new Uint8Array(10)
+        message[0] = 76
+        writeString(message, "$FIREHOSE", 1)
         return message
       default:
-        message = Buffer.alloc(1 + symbol.length)
-        message.writeUInt8(76, 0)
-        message.write(symbol, 1, "ascii")
+        message = new Uint8Array(1 + symbol.length)
+        message[0] = 76
+        writeString(message, symbol, 1)
         return message
     }
   }
