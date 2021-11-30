@@ -34,7 +34,7 @@ function readString(bytes, startPos, endPos) {
   else startPos |= 0
   if (endPos === undefined || endPos > bytes.length) endPos = bytes.length
   else endPos |= 0
-  if (end <= start) return ''
+  if (endPos <= startPos) return ''
   const chunk = bytes.slice(startPos, endPos)
   //return String.fromCharCode(chunk)
   Decoder.decode(chunk)
@@ -224,32 +224,63 @@ class IntrinioRealtime {
   }
 
   _trySetToken() {
-    return new Promise((fulfill, reject) => {
-      console.log("Intrinio Realtime Client - Authorizing...")
-      const url = this._getAuthUrl()
-      const xhr = new XMLHttpRequest()
-      xhr.onreadystatechange = () => {
-        if (xhr.readyState === 4) {
-          if (xhr.status === 401) {
-            console.error("Intrinio Realtime Client - Unable to authorize")
-            reject()
-          }
-          else if (xhr.status !== 200) {
-            console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
-            reject()
-          }
-          else {
-            this._token = xhr.responseText
-            console.log("Intrinio Realtime Client - Authorized")
-            fulfill()
+    if (this._config.isPublicKey) return new Promise((fulfill, reject) => {
+        console.log("Intrinio Realtime Client - Authorizing...")
+        const url = this._getAuthUrl()
+        const xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState === 4) {
+            if (xhr.status === 401) {
+              console.error("Intrinio Realtime Client - Unable to authorize")
+              reject()
+            }
+            else if (xhr.status !== 200) {
+              console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", xhr.status)
+              reject()
+            }
+            else {
+              this._token = xhr.responseText
+              console.log("Intrinio Realtime Client - Authorized")
+              fulfill()
+            }
           }
         }
-      }
-      xhr.open("GET", url, true)
-      xhr.overrideMimeType("text/html")
-      xhr.setRequestHeader('Content-Type', 'application/json')
-      if (this._config.isPublicKey) xhr.setRequestHeader('Authorization', 'Public ' + public_key)
-      xhr.send()
+        xhr.open("GET", url, true)
+        xhr.overrideMimeType("text/html")
+        xhr.setRequestHeader('Content-Type', 'application/json')
+        if (this._config.isPublicKey) xhr.setRequestHeader('Authorization', 'Public ' + public_key)
+        console.log(xhr)
+        xhr.send()
+      })
+    else return new Promise((fulfill, reject) => {
+      const https = require('https')
+      console.log("Intrinio Realtime Client - Authorizing...")
+      const url = this._getAuthUrl()
+      const request = https.get(url, response => {
+        if (response.statusCode == 401) {
+          console.error("Intrinio Realtime Client - Unable to authorize")
+          reject()
+        }
+        else if (response.statusCode != 200) {
+          console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
+          reject()
+        }
+        else {
+          response.on("data", data => {
+            this._token = Buffer.from(data).toString("utf8")
+            console.log("Intrinio Realtime Client - Authorized")
+            fulfill()
+          })
+        }
+      })
+      request.on("timeout", () => {
+        console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
+        reject()
+      })
+      request.on("error", error => {
+        console.error("Intrinio Realtime Client - Unable to get auth token (%s)", error.toString())
+        reject()
+      })
     })
   }
 
