@@ -1,7 +1,7 @@
 'use strict'
 
-const Encoder = new TextEncoder()
-const Decoder = new TextDecoder("utf-8")
+const encoder = new TextEncoder()
+const decoder = new TextDecoder("utf8")
 
 const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000]
@@ -26,6 +26,7 @@ async function doBackoff(context, callback) {
 }
 
 function readString(bytes, startPos, endPos) {
+  console.log("bytes = %s, startpos = %s, endpos = %s", bytes, startPos, endPos)
   if (startPos < 0) startPos = 0
   else if (startPos >= bytes.length) return ''
   else startPos |= 0
@@ -33,7 +34,7 @@ function readString(bytes, startPos, endPos) {
   else endPos |= 0
   if (endPos <= startPos) return ''
   const chunk = bytes.slice(startPos, endPos)
-  Decoder.decode(chunk)
+  return decoder.decode(chunk)
 }
 
 function readInt32(bytes, startPos = 0) {
@@ -73,16 +74,16 @@ function readUInt64(bytes, startPos = 0) {
     (bytes[++startPos] * 65536) +
     (bytes[++startPos] * 16777216)
   const upper =
-    bytes[++startPos]
+    bytes[++startPos] +
     (bytes[++startPos] * 256) +
     (bytes[++startPos] * 65536) +
     (last * 16777216)
-  return (BigInt(lower) + (BigInt(upper) << 32))
+  return (BigInt(lower) + (BigInt(upper) << 32n))
 }
 
 function writeString(bytes, string, startPos) {
   if (startPos === undefined || startPos < 0 || startPos > bytes.length - 1) return bytes
-  const encodedString = Encoder.encode(string)
+  const encodedString = encoder.encode(string)
   const bytesAvailable = bytes.length - startPos
   if (bytesAvailable < string.length) {
     const trimmedEncodedString = encodedString.slice(0, bytesAvailable)
@@ -192,7 +193,7 @@ class IntrinioRealtime {
   }
 
   _parseSocketMessage(data) {
-    let bytes = Uint8Array.from(data)
+    let bytes = new Uint8Array(data)
     let msgCount = bytes[0]
     let startIndex = 1
     for (let i = 0; i < msgCount; i++) {
@@ -205,6 +206,7 @@ class IntrinioRealtime {
           endIndex = endIndex + 22
           chunk = bytes.slice(startIndex, endIndex)
           let trade = this._parseTrade(chunk, symbolLength)
+          console.log("trade = ", trade)
           startIndex = endIndex
           this._onTrade(trade)
           break;
@@ -357,6 +359,7 @@ class IntrinioRealtime {
           console.info("Intrinio Realtime Client - Websocket initializing (public key)")
           let wsUrl = this._getWebSocketUrl()
           this._websocket = new WebSocket(wsUrl)
+          this._websocket.binaryType = "arraybuffer"
           this._websocket.onopen = () => {
             console.log("Intrinio Realtime Client - Websocket connected (public key)")
             if (!this._heartbeat) {
@@ -405,7 +408,10 @@ class IntrinioRealtime {
           }
           this._websocket.onmessage = (message) => {
             this._msgCount++
-            this._parseSocketMessage(message)
+            if (message.data instanceof ArrayBuffer)
+              this._parseSocketMessage(message.data)
+            else
+              console.log("Intrinio Realtime Client - Message: %s", message.data)
           }
         }
         catch (error) {
