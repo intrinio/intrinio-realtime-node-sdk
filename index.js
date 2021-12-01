@@ -231,7 +231,7 @@ class IntrinioRealtime {
           const url = this._getAuthUrl()
           const xhr = new XMLHttpRequest()
           xhr.onerror = (error) => {
-            console.error("Intrinio Realtime Client - Unable to get public key auth token (%s)", error.toString())
+            console.error("Intrinio Realtime Client - Error getting public key auth token: ", error)
             reject()
           }
           xhr.ontimeout = () => {
@@ -258,7 +258,6 @@ class IntrinioRealtime {
                 fulfill()
               }
             }
-            else console.log("ready state = %i", xhr.readyState)
           }
           xhr.open("GET", url, true)
           xhr.overrideMimeType("text/html")
@@ -288,7 +287,7 @@ class IntrinioRealtime {
             }
             else {
               response.on("data", data => {
-                this._token = Buffer.from(data).toString("utf8")
+                this._token = decoder.decode(data)
                 console.log("Intrinio Realtime Client - Authorized")
                 fulfill()
               })
@@ -299,7 +298,7 @@ class IntrinioRealtime {
           reject()
         })
         request.on("error", error => {
-          console.error("Intrinio Realtime Client - Unable to get auth token (%s)", error.toString())
+          console.error("Intrinio Realtime Client - Error getting auth token: ", error)
           reject()
         })
       }
@@ -423,6 +422,7 @@ class IntrinioRealtime {
       return new Promise((fulfill, reject) => {
         try {
           console.info("Intrinio Realtime Client - Websocket initializing")
+          const WebSocket = require('ws')
           let wsUrl = this._getWebSocketUrl()
           this._websocket = new WebSocket(wsUrl, {perMessageDeflate: false})
           this._websocket.on("open", () => {
@@ -575,4 +575,6 @@ class IntrinioRealtime {
   }
 }
 
-//module.exports = IntrinioRealtime
+if (typeof window === 'undefined') {
+  module.exports = IntrinioRealtime
+}
