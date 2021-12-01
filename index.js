@@ -1,7 +1,7 @@
 'use strict'
 
-const Promise = require('promise')
-const WebSocket = require('ws')
+//const Promise = require('promise')
+//const WebSocket = require('ws')
 
 const Encoder = new TextEncoder()
 const Decoder = new TextDecoder("utf-8")
@@ -224,55 +224,69 @@ class IntrinioRealtime {
   }
 
   _trySetToken() {
-    if (this._config.isPublicKey) return new Promise((fulfill, reject) => {
-        console.log("Intrinio Realtime Client - Authorizing...")
+    if (this._config.isPublicKey)
+      return new Promise((fulfill, reject) => {
+        console.log("Intrinio Realtime Client - Authorizing (public key)...")
         const url = this._getAuthUrl()
         const xhr = new XMLHttpRequest()
+        xhr.onerror = (error) => {
+          console.error("Intrinio Realtime Client - Unable to get public key auth token (%s)", error.toString())
+          reject()
+        }
+        xhr.ontimeout = () => {
+          console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
+          reject()
+        }
+        xhr.onabort = () => {
+          console.error("Intrinio Realtime Client - Aborted attempt to get auth token.")
+          reject()
+        }
         xhr.onreadystatechange = () => {
           if (xhr.readyState === 4) {
             if (xhr.status === 401) {
-              console.error("Intrinio Realtime Client - Unable to authorize")
+              console.error("Intrinio Realtime Client - Unable to authorize (public key)")
               reject()
             }
             else if (xhr.status !== 200) {
-              console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", xhr.status)
+              console.error("Intrinio Realtime Client - Could not get public key auth token: Status code (%i)", xhr.status)
               reject()
             }
             else {
+              console.log("Intrinio Realtime Client - Authorized (public key)")
               this._token = xhr.responseText
-              console.log("Intrinio Realtime Client - Authorized")
               fulfill()
             }
           }
+          else console.log("ready state = %i", xhr.readyState)
         }
         xhr.open("GET", url, true)
         xhr.overrideMimeType("text/html")
         xhr.setRequestHeader('Content-Type', 'application/json')
-        if (this._config.isPublicKey) xhr.setRequestHeader('Authorization', 'Public ' + public_key)
-        console.log(xhr)
+        xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey)
         xhr.send()
       })
-    else return new Promise((fulfill, reject) => {
-      const https = require('https')
-      console.log("Intrinio Realtime Client - Authorizing...")
-      const url = this._getAuthUrl()
-      const request = https.get(url, response => {
-        if (response.statusCode == 401) {
-          console.error("Intrinio Realtime Client - Unable to authorize")
-          reject()
-        }
-        else if (response.statusCode != 200) {
-          console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
-          reject()
-        }
-        else {
-          response.on("data", data => {
-            this._token = Buffer.from(data).toString("utf8")
-            console.log("Intrinio Realtime Client - Authorized")
-            fulfill()
-          })
-        }
-      })
+    else
+      return new Promise((fulfill, reject) => {
+        const https = require('https')
+        console.log("Intrinio Realtime Client - Authorizing...")
+        const url = this._getAuthUrl()
+        const request = https.get(url, response => {
+          if (response.statusCode == 401) {
+            console.error("Intrinio Realtime Client - Unable to authorize")
+            reject()
+          }
+          else if (response.statusCode != 200) {
+            console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode)
+            reject()
+          }
+          else {
+            response.on("data", data => {
+              this._token = Buffer.from(data).toString("utf8")
+              console.log("Intrinio Realtime Client - Authorized")
+              fulfill()
+            })
+          }
+        })
       request.on("timeout", () => {
         console.error("Intrinio Realtime Client - Timed out trying to get auth token.")
         reject()
@@ -327,62 +341,118 @@ class IntrinioRealtime {
   }
 
   _resetWebsocket() {
-    const self = this
-    return new Promise((fulfill, reject) => {
-      console.info("Intrinio Realtime Client - Websocket initializing")
-      let wsUrl = self._getWebSocketUrl()
-      self._websocket = new WebSocket(wsUrl, {perMessageDeflate: false})
-      self._websocket.on("open", () => {
-        console.log("Intrinio Realtime Client - Websocket connected")
-        if (!self._heartbeat) {
-          console.log("Intrinio Realtime Client - Starting heartbeat")
-          self._heartbeat = setInterval(() => {
-            if ((self._websocket) && (self._isReady)) {
-              this._websocket.send("")
-            }
-          }, HEARTBEAT_INTERVAL)
-        }
-        if (self._channels.size > 0) {
-          for (const [channel, tradesOnly] of self._channels) {
-            let message = self._makeJoinMessage(tradesOnly, channel)
-            console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
-            self._websocket.send(message)
-          }
-        }
-        self._lastReset = Date.now()
-        self._isReady = true
-        self._isReconnecting = false
-        fulfill(true)
-      })
-      self._websocket.on("close", (code, reason) => {
-        if (!self._attemptingReconnect) {
-          self._isReady = false
-          clearInterval(self._heartbeat)
-          self._heartbeat = null
-          console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code)
-          if (code != 1000) {
-            console.info("Intrinio Realtime Client - Websocket reconnecting...")
-            if (!self._isReady) {
-              self._attemptingReconnect = true
-              if ((Date.now() - self._lastReset) > 86400000) {
-                doBackoff(self, self._trySetToken).then(() => {doBackoff(self, self._resetWebsocket)})
-                this._updateToken()
+    if (this._config.isPublicKey)
+      return new Promise((fulfill, reject) => {
+        console.info("Intrinio Realtime Client - Websocket initializing (public key)")
+        let wsUrl = this._getWebSocketUrl()
+        this._websocket = new WebSocket(wsUrl)
+        this._websocket.onopen = () => {
+          console.log("Intrinio Realtime Client - Websocket connected (public key)")
+          if (!this._heartbeat) {
+            console.log("Intrinio Realtime Client - Starting heartbeat")
+            this._heartbeat = setInterval(() => {
+              if ((this._websocket) && (this._isReady)) {
+                this._websocket.send("")
               }
-              doBackoff(self, self._resetWebsocket)
+            }, HEARTBEAT_INTERVAL)
+          }
+          if (this._channels.size > 0) {
+            for (const [channel, tradesOnly] of this._channels) {
+              let message = this._makeJoinMessage(tradesOnly, channel)
+              console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
+              this._websocket.send(message)
             }
           }
+          this._lastReset = Date.now()
+          this._isReady = true
+          this._isReconnecting = false
+          fulfill(true)
         }
-        else reject()
+        this._websocket.onclose = (code) => {
+          if (!this._attemptingReconnect) {
+            this._isReady = false
+            clearInterval(this._heartbeat)
+            this._heartbeat = null
+            console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code)
+            if (code != 1000) {
+              console.info("Intrinio Realtime Client - Websocket reconnecting...")
+              if (!this._isReady) {
+                this._attemptingReconnect = true
+                if ((Date.now() - this._lastReset) > 86400000) {
+                  doBackoff(this, this._trySetToken).then(() => {doBackoff(this, this._resetWebsocket)})
+                  this._updateToken()
+                }
+                doBackoff(this, this._resetWebsocket)
+              }
+            }
+          }
+          else reject()
+        }
+        this._websocket.onerror = (error) => {
+          console.error("Intrinio Realtime Client - Websocket error: %s", error)
+          reject()
+        }
+        this._websocket.onmessage = (message) => {
+          this._msgCount++
+          this._parseSocketMessage(message)
+        }
       })
-      self._websocket.on("error", (error) => {
-        console.error("Intrinio Realtime Client - Websocket error: %s", error)
-        reject(false)
+    else
+      return new Promise((fulfill, reject) => {
+        console.info("Intrinio Realtime Client - Websocket initializing")
+        let wsUrl = this._getWebSocketUrl()
+        this._websocket = new WebSocket(wsUrl, {perMessageDeflate: false})
+        this._websocket.on("open", () => {
+          console.log("Intrinio Realtime Client - Websocket connected")
+          if (!this._heartbeat) {
+            console.log("Intrinio Realtime Client - Starting heartbeat")
+            this._heartbeat = setInterval(() => {
+              if ((this._websocket) && (this._isReady)) {
+                this._websocket.send("")
+              }
+            }, HEARTBEAT_INTERVAL)
+          }
+          if (this._channels.size > 0) {
+            for (const [channel, tradesOnly] of this._channels) {
+              let message = self._makeJoinMessage(tradesOnly, channel)
+              console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
+              this._websocket.send(message)
+            }
+          }
+          this._lastReset = Date.now()
+          this._isReady = true
+          this._isReconnecting = false
+          fulfill(true)
+        })
+        this._websocket.on("close", (code, reason) => {
+          if (!this._attemptingReconnect) {
+            this._isReady = false
+            clearInterval(this._heartbeat)
+            this._heartbeat = null
+            console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code)
+            if (code != 1000) {
+              console.info("Intrinio Realtime Client - Websocket reconnecting...")
+              if (!this._isReady) {
+                this._attemptingReconnect = true
+                if ((Date.now() - this._lastReset) > 86400000) {
+                  doBackoff(this, this._trySetToken).then(() => {doBackoff(this, this._resetWebsocket)})
+                  this._updateToken()
+                }
+                doBackoff(this, this._resetWebsocket)
+              }
+            }
+          }
+          else reject()
+        })
+        this._websocket.on("error", (error) => {
+          console.error("Intrinio Realtime Client - Websocket error: %s", error)
+          reject()
+        })
+        this._websocket.on("message", (message) => {
+          this._msgCount++
+          this._parseSocketMessage(message)
+        })
       })
-      self._websocket.on("message", (message) => {
-        self._msgCount++
-        self._parseSocketMessage(message)
-      })
-    })
   }
 
   _join(symbol, tradesOnly) {
@@ -477,4 +547,4 @@ class IntrinioRealtime {
   }
 }
 
-module.exports = IntrinioRealtime
+//module.exports = IntrinioRealtime

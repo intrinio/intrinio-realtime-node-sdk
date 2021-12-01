@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang='en'>
+  <head>
+    <link rel="stylesheet" href="sample.css">
+  </head>
+  <body>
+    <div class="container"></div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js" integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="../index.js"></script>
+    <script>
+      var $ = jQuery
+      $(document).ready(function() {
+
+        const accessKey = "208874008f886587a3425393f0d1d2f4"
+
+        let trades = new Map()
+        let quotes = new Map()
+        let maxTradeCount = 0
+        let maxCountTrade = null
+        let maxQuoteCount = 0
+        let maxCountQuote = null
+
+        function onTrade(trade) {
+            let key = trade.Symbol
+            if (trades.has(key)) {
+                let value = trades.get(key)
+                if (value + 1 > maxTradeCount) {
+                    trades.set(key, value + 1)
+                    maxTradeCount = value + 1
+                    maxCountTrade = trade
+                } 
+            }
+            else trades.set(key, 1)
+            let tradeElement = $.parseHTML('<div class="quote">' + trade.Symbol + '(trade)' +' $' + trade.Price + '</div>')
+            $('.container').prepend(tradeElement)
+            if ($('.container div').length > 500) {
+              $('.container div:last-child').remove()
+            }
+        }
+
+        function onQuote(quote) {
+            let key = quote.Symbol + ":" + quote.Type
+            if (quotes.has(key)) {
+                let value = quotes.get(key)
+                if (value + 1 > maxQuoteCount) {
+                    quotes.set(key, value + 1)
+                    maxQuoteCount = value + 1
+                    maxCountQuote = quote
+                }
+            }
+            else quotes.set(key, 1)
+            let quoteElement = $.parseHTML('<div class="quote">' + quote.Symbol + '(quote type:' + quote.Type + ')' +' $' + quote.Price + '</div>')
+            $('.container').prepend(quoteElement)
+            if ($('.container div').length > 500) {
+              $('.container div:last-child').remove()
+            }
+        }
+        
+        let config = {
+          isPublicKey: true
+        }
+        
+        let client = new IntrinioRealtime(accessKey, onTrade, onQuote, config)
+        
+        client.join("GOOG", true)
+
+        setInterval(() => {
+            if (maxTradeCount > 0) {
+                console.log("Most active security (by trade frequency): %s (%i updates)", maxCountTrade, maxTradeCount)
+            }
+            if (maxQuoteCount > 0) {
+                console.log("Most active security (by quote frequency): %s (%i updates)", maxCountQuote, maxQuoteCount)
+            }
+            let totalMsgCount = client.getTotalMsgCount()
+            if (totalMsgCount > 0) {
+                console.log("Total updates received = %i", totalMsgCount)
+            }
+            else {
+                console.log("No updates")
+            }
+        }, 10000)
+
+      })
+    </script>
+  </body>
+</html>
