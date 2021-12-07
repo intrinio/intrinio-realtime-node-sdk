@@ -26,7 +26,6 @@ async function doBackoff(context, callback) {
 }
 
 function readString(bytes, startPos, endPos) {
-  console.log("bytes = %s, startpos = %s, endpos = %s", bytes, startPos, endPos)
   if (startPos < 0) startPos = 0
   else if (startPos >= bytes.length) return ''
   else startPos |= 0
