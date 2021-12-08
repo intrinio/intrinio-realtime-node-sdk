@@ -205,7 +205,6 @@ class IntrinioRealtime {
           endIndex = endIndex + 22
           chunk = bytes.slice(startIndex, endIndex)
           let trade = this._parseTrade(chunk, symbolLength)
-          console.log("trade = ", trade)
           startIndex = endIndex
           this._onTrade(trade)
           break;
@@ -262,6 +261,7 @@ class IntrinioRealtime {
           xhr.overrideMimeType("text/html")
           xhr.setRequestHeader('Content-Type', 'application/json')
           xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey)
+          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv3.1")
           xhr.send()
         }
         catch (error) {
@@ -272,10 +272,15 @@ class IntrinioRealtime {
     else
       return new Promise((fulfill, reject) => {
         try {
-          const https = require('https')
+          const protocol = (this._config.provider === "MANUAL") ? require('http') : require('https')
           console.log("Intrinio Realtime Client - Authorizing...")
           const url = this._getAuthUrl()
-          const request = https.get(url, response => {
+          const options = {
+            headers: {
+              'Client-Information': 'IntrinioRealtimeNodeSDKv3.1'
+            }
+          }
+          const request = protocol.get(url, options, response => {
             if (response.statusCode == 401) {
               console.error("Intrinio Realtime Client - Unable to authorize")
               reject()

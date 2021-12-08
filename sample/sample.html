@@ -50,7 +50,10 @@
                 }
             }
             else quotes.set(key, 1)
-            let quoteElement = $.parseHTML('<div class="quote">' + quote.Symbol + '(quote type:' + quote.Type + ')' +' $' + quote.Price + '</div>')
+            let quoteType = "undefined"
+            if (quote.Type === 1) quoteType = "ask"
+            else if (quote.Type === 2) quoteType = "bid"
+            let quoteElement = $.parseHTML('<div class="quote">' + quote.Symbol + '(' + quoteType + ')' +' $' + quote.Price + '</div>')
             $('.container').prepend(quoteElement)
             if ($('.container div').length > 500) {
               $('.container div:last-child').remove()
