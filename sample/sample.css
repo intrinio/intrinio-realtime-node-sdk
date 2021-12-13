@@ -1,0 +1,33 @@
+.container {
+  margin: 20px auto;
+  width: 1280px;
+  height: 720px;
+  background: #262626;
+  text-align: left;
+  overflow: hidden;
+}
+
+.quote {
+  display: inline-block;
+  padding: 2px 4px;
+  margin: 2px;
+  font-family: "Arial";
+  font-size: 15px;
+  white-space: nowrap;
+  color: white;
+}
+
+.ask.quote {
+  background: #B71F1F;
+  border: 1px solid #FF0000;
+}
+
+.last.quote {
+  background: #1F60B7;
+  border: 1px solid #3E82DE;
+}
+
+.bid.quote {
+  background: #1C891D;
+  border: 1px solid #17C432;
+}
