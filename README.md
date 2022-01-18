@@ -199,7 +199,7 @@ const client = new IntrinioRealtimeClient("INTRINIO_API_KEY", onTrade, onQuote, 
 ---------
 
 `join(symbols, tradesOnly)` - Joins the given channels. This can be called at any time. The client will automatically register joined channels and establish the proper subscriptions with the WebSocket connection.
-* **Parameter** `symbols` - A string representing a single ticker symbol (e.g. "AAPL") or an array of ticker symbols (e.g. ["AAPL", "MSFT", "GOOG"]) to join.
+* **Parameter** `symbols` - A string representing a single ticker symbol (e.g. "AAPL") or an array of ticker symbols (e.g. ["AAPL", "MSFT", "GOOG"]) to join. You can also use the special symbol, "$lobby" to join the firehose channel and recieved updates for all ticker symbols. You must have a valid "firehose" subscription.
 * **Parameter** `tradesOnly` - Optional (default: false). A boolean value indicating whether the server should return trade data only (as opposed to trade and quote data).
 ```javascript
 client.join(["AAPL", "MSFT", "GOOG"])
