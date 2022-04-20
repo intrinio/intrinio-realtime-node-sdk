@@ -62,6 +62,18 @@ function readUInt32(bytes, startPos = 0) {
   )
 }
 
+function readFloat32(bytes, float32Array, backingByteArray, startPos = 0) {
+  const first = bytes[startPos]
+  const last = bytes[startPos + 3]
+  if (first === undefined || last === undefined)
+    console.error("Intrinio Realtime Client - Cannot read Float32")
+  backingByteArray[0] = first
+  backingByteArray[1] = bytes[++startPos]
+  backingByteArray[2] = bytes[++startPos]
+  backingByteArray[3] = last
+  return float32Array[0]
+}
+
 function readUInt64(bytes, startPos = 0) {
   const first = bytes[startPos]
   const last = bytes[startPos + 7]
@@ -112,6 +124,8 @@ class IntrinioRealtime {
     this._heartbeat = null
     this._onTrade = (onTrade && (typeof onTrade === "function")) ? onTrade : (_) => {}
     this._onQuote = (onQuote && (typeof onQuote === "function")) ? onQuote : (_) => {}
+    this._float32Array = new Float32Array(1)
+    this._backingByteArray = new Uint8Array(this._float32Array.buffer)
 
     if ((!this._accessKey) || (this._accessKey === "")) {
       throw "Intrinio Realtime Client - Access Key is required"
@@ -174,7 +188,7 @@ class IntrinioRealtime {
   _parseTrade(bytes, symbolLength) {
     return {
       Symbol: readString(bytes, 2, 2 + symbolLength),
-      Price: readInt32(bytes, 2 + symbolLength) / 10000.0,
+      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 2 + symbolLength),
       Size: readUInt32(bytes, 6 + symbolLength),
       Timestamp: readUInt64(bytes, 10 + symbolLength),
       TotalVolume: readUInt32(bytes, 18 + symbolLength)
@@ -185,7 +199,7 @@ class IntrinioRealtime {
     return {
       Type: bytes[0],
       Symbol: readString(bytes, 2, 2 + symbolLength),
-      Price: readInt32(bytes, 2 + symbolLength) / 10000.0,
+      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 2 + symbolLength),
       Size: readUInt32(bytes, 6 + symbolLength),
       Timestamp: readUInt64(bytes, 10 + symbolLength)
     }
@@ -261,7 +275,7 @@ class IntrinioRealtime {
           xhr.overrideMimeType("text/html")
           xhr.setRequestHeader('Content-Type', 'application/json')
           xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey)
-          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv3.1")
+          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv3.2")
           xhr.send()
         }
         catch (error) {
