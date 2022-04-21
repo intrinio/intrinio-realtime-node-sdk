@@ -44,3 +44,5 @@ test5.js
 test6.js
 
 .DS_Store
+
+package-lock.json
