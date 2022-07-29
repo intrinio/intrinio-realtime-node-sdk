@@ -275,7 +275,7 @@ class IntrinioRealtime {
           xhr.overrideMimeType("text/html")
           xhr.setRequestHeader('Content-Type', 'application/json')
           xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey)
-          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.0")
+          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.0.1")
           xhr.send()
         }
         catch (error) {
