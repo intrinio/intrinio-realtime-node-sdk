@@ -36,7 +36,7 @@ function onQuote(quote) {
 }
 
 let client = new Client(accessKey, onTrade, onQuote)
-client.join("GOOG", true)
+client.join("GOOG", false)
 
 setInterval(() => {
     if (maxTradeCount > 0) {

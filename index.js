@@ -411,7 +411,6 @@ class IntrinioRealtime {
                   this._attemptingReconnect = true
                   if ((Date.now() - this._lastReset) > 86400000) {
                     doBackoff(this, this._trySetToken).then(() => {doBackoff(this, this._resetWebsocket)})
-                    this._updateToken()
                   }
                   doBackoff(this, this._resetWebsocket)
                 }
@@ -455,7 +454,7 @@ class IntrinioRealtime {
             }
             if (this._channels.size > 0) {
               for (const [channel, tradesOnly] of this._channels) {
-                let message = self._makeJoinMessage(tradesOnly, channel)
+                let message = this._makeJoinMessage(tradesOnly, channel)
                 console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
                 this._websocket.send(message)
               }
@@ -477,7 +476,6 @@ class IntrinioRealtime {
                   this._attemptingReconnect = true
                   if ((Date.now() - this._lastReset) > 86400000) {
                     doBackoff(this, this._trySetToken).then(() => {doBackoff(this, this._resetWebsocket)})
-                    this._updateToken()
                   }
                   doBackoff(this, this._resetWebsocket)
                 }
@@ -574,7 +572,6 @@ class IntrinioRealtime {
 
   async stop() {
     this._isReady = false
-    this._doReconnect = false
     console.log("Intrinio Realtime Client - Leaving subscribed channels")
     for (const channel of this._channels.keys()) {
       this._leave(channel)
