@@ -29,6 +29,7 @@
   "homepage": "https://github.com/intrinio/intrinio-realtime-sdk#readme",
   "dependencies": {
     "promise": "^8.1.0",
-    "ws": "^8.5.0"
+    "utf-8-validate": "^5.0.9",
+    "ws": "^8.8.1"
   }
 }
