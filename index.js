@@ -71,7 +71,8 @@ function readFloat32(bytes, float32Array, backingByteArray, startPos = 0) {
   backingByteArray[1] = bytes[++startPos]
   backingByteArray[2] = bytes[++startPos]
   backingByteArray[3] = last
-  return float32Array[0]
+  let parsed = parseFloat(float32Array[0].toFixed(4))
+  return parsed < 0 ? 0 : parsed
 }
 
 function readUInt64(bytes, startPos = 0) {
