@@ -13,6 +13,7 @@ SDK for working with Intrinio's realtime Multi-Exchange prices feed. Intrinio’
 * Receive streaming, real-time price quotes (last trade, bid, ask)
 * Subscribe to updates from individual securities
 * Subscribe to updates for all securities
+* Multiple sources of data - REALTIME or DELAYED_SIP
 
 ## Script
 To use the Web SDK (non-NodeJS), include the `index.js` script (found in this repository) at the end of your `<body>` tag:
@@ -61,7 +62,7 @@ npm install intrinio-realtime --save
 ```javascript
 const IntrinioRealtimeClient = require('intrinio-realtime')
 const accessKey = ""
-const provider = "REALTIME"
+const provider = "REALTIME" // or "DELAYED_SIP"
 const config = {
   tradesOnly: true,
 }

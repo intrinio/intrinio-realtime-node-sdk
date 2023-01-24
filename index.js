@@ -171,6 +171,9 @@ class IntrinioRealtime {
       case "REALTIME":
         if (this._config.isPublicKey) return "https://realtime-mx.intrinio.com/auth"
         else return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey
+      case "DELAYED_SIP":
+        if (this._config.isPublicKey) return "https://realtime-delayed-sip.intrinio.com/auth"
+        else return "https://realtime-delayed-sip.intrinio.com/auth?api_key=" + this._accessKey
       case "MANUAL":
         if (this._config.isPublicKey) return "http://" + this._config.ipAddress + "/auth"
         else return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
@@ -181,6 +184,7 @@ class IntrinioRealtime {
   _getWebSocketUrl() {
     switch(this._config.provider) {
       case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
+      case "DELAYED_SIP": return "wss://realtime-delayed-sip.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
       case "MANUAL": return "ws://" + this._config.ipAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token
       default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
@@ -276,7 +280,7 @@ class IntrinioRealtime {
           xhr.overrideMimeType("text/html")
           xhr.setRequestHeader('Content-Type', 'application/json')
           xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey)
-          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.0.2")
+          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.1.0")
           xhr.send()
         }
         catch (error) {
@@ -292,7 +296,7 @@ class IntrinioRealtime {
           const url = this._getAuthUrl()
           const options = {
             headers: {
-              'Client-Information': 'IntrinioRealtimeNodeSDKv3.1'
+              'Client-Information': 'IntrinioRealtimeNodeSDKv4.1'
             }
           }
           const request = protocol.get(url, options, response => {
