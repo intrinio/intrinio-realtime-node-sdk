@@ -8,6 +8,13 @@ SDK for working with Intrinio's realtime Multi-Exchange prices feed. Intrinio’
 - NodeJS 16.13.0 (for NodeJS usage), or
 - A modern web browser and web server (for vanilla JS usage)
 
+## Docker
+Add your API key to the realtime.js file, then
+```
+docker compose build
+docker compose run client
+```
+
 ## Features
 
 * Receive streaming, real-time price quotes (last trade, bid, ask)
