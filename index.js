@@ -105,7 +105,7 @@ function writeString(bytes, string, startPos) {
 }
 
 const defaultConfig = {
-  provider: 'REALTIME', 
+  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false
@@ -135,8 +135,9 @@ class IntrinioRealtime {
     if (!this._config.provider) {
       throw "Intrinio Realtime Client - 'config.provider' must be specified"
     }
-    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")) {
-      throw "Intrinio Realtime Client - 'config.provider' must be either 'REALTIME' or 'MANUAL'"
+    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")
+       && (this._config.provider !== "DELAYED_SIP") && (this._config.provider !== "NASDAQ_BASIC")) {
+      throw "Intrinio Realtime Client - 'config.provider' must be either 'REALTIME' or 'MANUAL' or 'DELAYED_SIP' or 'NASDAQ_BASIC'"
     }
 
     if ((this._config.provider === "MANUAL") && ((!this._config.ipAddress) || (this._config.ipAddress === ""))) {
@@ -174,6 +175,9 @@ class IntrinioRealtime {
       case "DELAYED_SIP":
         if (this._config.isPublicKey) return "https://realtime-delayed-sip.intrinio.com/auth"
         else return "https://realtime-delayed-sip.intrinio.com/auth?api_key=" + this._accessKey
+      case "NASDAQ_BASIC":
+        if (this._config.isPublicKey) return "https://realtime-nasdaq-basic.intrinio.com/auth"
+        else return "https://realtime-nasdaq-basic.intrinio.com/auth?api_key=" + this._accessKey
       case "MANUAL":
         if (this._config.isPublicKey) return "http://" + this._config.ipAddress + "/auth"
         else return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey
@@ -185,6 +189,7 @@ class IntrinioRealtime {
     switch(this._config.provider) {
       case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
       case "DELAYED_SIP": return "wss://realtime-delayed-sip.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
+      case "NASDAQ_BASIC": return "wss://realtime-nasdaq-basic.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token
       case "MANUAL": return "ws://" + this._config.ipAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token
       default: throw "Intrinio Realtime Client - 'config.provider' not specified!"
     }
