@@ -285,7 +285,7 @@ class IntrinioRealtime {
           xhr.overrideMimeType("text/html")
           xhr.setRequestHeader('Content-Type', 'application/json')
           xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey)
-          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.1.0")
+          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.2.0")
           xhr.send()
         }
         catch (error) {
@@ -301,7 +301,7 @@ class IntrinioRealtime {
           const url = this._getAuthUrl()
           const options = {
             headers: {
-              'Client-Information': 'IntrinioRealtimeNodeSDKv4.1'
+              'Client-Information': 'IntrinioRealtimeNodeSDKv4.2'
             }
           }
           const request = protocol.get(url, options, response => {
