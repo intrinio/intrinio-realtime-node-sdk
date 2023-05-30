@@ -1,10 +1,15 @@
 'use strict'
 
-const encoder = new TextEncoder()
-const decoder = new TextDecoder("utf8")
+const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf8");
 
-const HEARTBEAT_INTERVAL = 1000 * 20 // 20 seconds
-const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000]
+const HEARTBEAT_INTERVAL = 1000 * 20; // 20 seconds
+const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000];
+
+const CLIENT_INFO_HEADER_KEY = "Client-Information";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv4.2";
+const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
+const MESSAGE_VERSION_HEADER_VALUE = "v2";
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -195,23 +200,80 @@ class IntrinioRealtime {
     }
   }
 
-  _parseTrade(bytes, symbolLength) {
-    return {
-      Symbol: readString(bytes, 2, 2 + symbolLength),
-      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 2 + symbolLength),
-      Size: readUInt32(bytes, 6 + symbolLength),
-      Timestamp: readUInt64(bytes, 10 + symbolLength),
-      TotalVolume: readUInt32(bytes, 18 + symbolLength)
+  _getMessageType(val){
+    switch(val) {
+      case 0:
+        return 'Trade';
+        break;
+      case 1:
+        return 'Ask';
+        break;
+      case 2:
+        return 'Bid';
+        break;
+      default:
+        return '';
+        break;
     }
   }
 
-  _parseQuote (bytes, symbolLength) {
+  _getSubProvider(val){
+    switch(val) {
+      case 0:
+        return 'NONE';
+        break;
+      case 1:
+        return 'CTA_A';
+        break;
+      case 2:
+        return 'CTA_B';
+        break;
+      case 3:
+        return 'UTP';
+        break;
+      case 4:
+        return 'OTC';
+        break;
+      case 5:
+        return 'NASDAQ_BASIC';
+        break;
+      case 6:
+        return 'IEX';
+        break;
+      default:
+        return 'NONE';
+        break;
+    }
+  }
+
+  _parseTrade(bytes) {
+    let symbolLength = bytes[2];
+    let conditionLength = bytes[26 + symbolLength];
     return {
-      Type: bytes[0],
-      Symbol: readString(bytes, 2, 2 + symbolLength),
-      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 2 + symbolLength),
-      Size: readUInt32(bytes, 6 + symbolLength),
-      Timestamp: readUInt64(bytes, 10 + symbolLength)
+      Type: this._getMessageType(bytes[0]),
+      Symbol: readString(bytes, 3, 3 + symbolLength),
+      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 6 + symbolLength),
+      Size: readUInt32(bytes, 10 + symbolLength),
+      Timestamp: readUInt64(bytes, 14 + symbolLength),
+      TotalVolume: readUInt32(bytes, 22 + symbolLength),
+      SubProvider: this._getSubProvider(bytes[3]),
+      MarketCenter: readString(bytes, 4 + symbolLength, 6 + symbolLength),
+      Condition: conditionLength > 0 ? readString(bytes, 27 + symbolLength, 27 + symbolLength + conditionLength) : ""
+    }
+  }
+
+  _parseQuote (bytes) {
+    let symbolLength = bytes[2];
+    let conditionLength = bytes[22 + symbolLength];
+    return {
+      Type: this._getMessageType(bytes[0]),
+      Symbol: readString(bytes, 3, 3 + symbolLength),
+      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 6 + symbolLength),
+      Size: readUInt32(bytes, 10 + symbolLength),
+      Timestamp: readUInt64(bytes, 14 + symbolLength),
+      SubProvider: this._getSubProvider(bytes[3]),
+      MarketCenter: readString(bytes, 4 + symbolLength, 6 + symbolLength),
+      Condition: conditionLength > 0 ? readString(bytes, 23 + symbolLength, 23 + symbolLength + conditionLength) : ""
     }
   }
 
@@ -221,27 +283,22 @@ class IntrinioRealtime {
     let startIndex = 1
     for (let i = 0; i < msgCount; i++) {
       let msgType = bytes[startIndex]
-      let symbolLength = bytes[startIndex + 1]
-      let endIndex = startIndex + symbolLength
-      let chunk = null
+      let msgLength = bytes[startIndex + 1]
+      let endIndex = startIndex + msgLength
+      let chunk = bytes.slice(startIndex, endIndex)
       switch(msgType) {
         case 0:
-          endIndex = endIndex + 22
-          chunk = bytes.slice(startIndex, endIndex)
-          let trade = this._parseTrade(chunk, symbolLength)
-          startIndex = endIndex
+          let trade = this._parseTrade(chunk)
           this._onTrade(trade)
           break;
         case 1:
         case 2:
-          endIndex = endIndex + 18
-          chunk = bytes.slice(startIndex, endIndex)
-          let quote = this._parseQuote(chunk, symbolLength)
-          startIndex = endIndex
+          let quote = this._parseQuote(chunk)
           this._onQuote(quote)
           break;
         default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType)
       }
+      startIndex = endIndex
     }
   }
 
@@ -301,7 +358,7 @@ class IntrinioRealtime {
           const url = this._getAuthUrl()
           const options = {
             headers: {
-              'Client-Information': 'IntrinioRealtimeNodeSDKv4.2'
+              [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE
             }
           }
           const request = protocol.get(url, options, response => {
@@ -385,8 +442,11 @@ class IntrinioRealtime {
         try {
           console.info("Intrinio Realtime Client - Websocket initializing (public key)")
           let wsUrl = this._getWebSocketUrl()
-          this._websocket = new WebSocket(wsUrl)
-          this._websocket.binaryType = "arraybuffer"
+          this._websocket = new WebSocket(wsUrl, null, {headers: {
+              [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE,
+              [MESSAGE_VERSION_HEADER_KEY]: MESSAGE_VERSION_HEADER_VALUE
+            }});
+          this._websocket.binaryType = "arraybuffer";
           this._websocket.onopen = () => {
             console.log("Intrinio Realtime Client - Websocket connected (public key)")
             if (!this._heartbeat) {
@@ -408,7 +468,7 @@ class IntrinioRealtime {
             this._isReady = true
             this._isReconnecting = false
             fulfill(true)
-          }
+          };
           this._websocket.onclose = (code) => {
             if (!this._attemptingReconnect) {
               this._isReady = false
@@ -427,31 +487,34 @@ class IntrinioRealtime {
               }
             }
             else reject()
-          }
+          };
           this._websocket.onerror = (error) => {
             console.error("Intrinio Realtime Client - Websocket error: %s", error)
             reject()
-          }
+          };
           this._websocket.onmessage = (message) => {
             this._msgCount++
             if (message.data instanceof ArrayBuffer)
               this._parseSocketMessage(message.data)
             else
               console.log("Intrinio Realtime Client - Message: %s", message.data)
-          }
+          };
         }
         catch (error) {
-          console.error("Intrinio Realtime Client - Error establishing public key websocket connection (%s)", error)
-          reject()
+          console.error("Intrinio Realtime Client - Error establishing public key websocket connection (%s)", error);
+          reject();
         }
       })
     else
       return new Promise((fulfill, reject) => {
         try {
-          console.info("Intrinio Realtime Client - Websocket initializing")
-          const WebSocket = require('ws')
-          let wsUrl = this._getWebSocketUrl()
-          this._websocket = new WebSocket(wsUrl, {perMessageDeflate: false})
+          console.info("Intrinio Realtime Client - Websocket initializing");
+          const WebSocket = require('ws');
+          let wsUrl = this._getWebSocketUrl();
+          this._websocket = new WebSocket(wsUrl, {perMessageDeflate: false}, {headers: {
+            [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE,
+            [MESSAGE_VERSION_HEADER_KEY]: MESSAGE_VERSION_HEADER_VALUE
+          }});
           this._websocket.on("open", () => {
             console.log("Intrinio Realtime Client - Websocket connected")
             if (!this._heartbeat) {
@@ -461,19 +524,19 @@ class IntrinioRealtime {
                   this._websocket.send("")
                 }
               }, HEARTBEAT_INTERVAL)
-            }
+            };
             if (this._channels.size > 0) {
               for (const [channel, tradesOnly] of this._channels) {
                 let message = this._makeJoinMessage(tradesOnly, channel)
                 console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly)
                 this._websocket.send(message)
               }
-            }
-            this._lastReset = Date.now()
-            this._isReady = true
-            this._isReconnecting = false
-            fulfill(true)
-          })
+            };
+            this._lastReset = Date.now();
+            this._isReady = true;
+            this._isReconnecting = false;
+            fulfill(true);
+          });
           this._websocket.on("close", (code, reason) => {
             if (!this._attemptingReconnect) {
               this._isReady = false
@@ -492,19 +555,19 @@ class IntrinioRealtime {
               }
             }
             else reject()
-          })
+          });
           this._websocket.on("error", (error) => {
             console.error("Intrinio Realtime Client - Websocket error: %s", error)
             reject()
-          })
+          });
           this._websocket.on("message", (message) => {
             this._msgCount++
             this._parseSocketMessage(message)
-          })
+          });
         }
         catch (error) {
-          console.error("Intrinio Realtime Client - Error establishing websocket connection (%s)", error)
-          reject()
+          console.error("Intrinio Realtime Client - Error establishing websocket connection (%s)", error);
+          reject();
         }
       })
   }
