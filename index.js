@@ -7,7 +7,7 @@ const HEARTBEAT_INTERVAL = 1000 * 20; // 20 seconds
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000];
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv4.2";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.0";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 
