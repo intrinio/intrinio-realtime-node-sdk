@@ -2,6 +2,7 @@
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf8");
+const unicodeDecoder = new TextDecoder("utf-16be");
 
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000];
 
@@ -38,6 +39,17 @@ function readString(bytes, startPos, endPos) {
   if (endPos <= startPos) return '';
   const chunk = bytes.slice(startPos, endPos);
   return decoder.decode(chunk);
+}
+
+function readUnicodeString(bytes, startPos, endPos) {
+  if (startPos < 0) startPos = 0;
+  else if (startPos >= bytes.length) return '';
+  else startPos |= 0;
+  if (endPos === undefined || endPos > bytes.length) endPos = bytes.length;
+  else endPos |= 0;
+  if (endPos <= startPos) return '';
+  const chunk = bytes.slice(startPos, endPos);
+  return unicodeDecoder.decode(chunk);
 }
 
 function readInt32(bytes, startPos = 0) {
@@ -190,10 +202,10 @@ class IntrinioRealtime {
 
   _getWebSocketUrl() {
     switch(this._config.provider) {
-      case "REALTIME": return "wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token;
-      case "DELAYED_SIP": return "wss://realtime-delayed-sip.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token;
-      case "NASDAQ_BASIC": return "wss://realtime-nasdaq-basic.intrinio.com/socket/websocket?vsn=1.0.0&token=" + this._token;
-      case "MANUAL": return "ws://" + this._config.ipAddress + "/socket/websocket?vsn=1.0.0&token=" + this._token;
+      case "REALTIME": return `wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
+      case "DELAYED_SIP": return `wss://realtime-delayed-sip.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
+      case "NASDAQ_BASIC": return `wss://realtime-nasdaq-basic.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
+      case "MANUAL": return "ws://" + this._config.ipAddress + `/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       default: throw "Intrinio Realtime Client - 'config.provider' not specified!";
     }
   }
@@ -254,8 +266,8 @@ class IntrinioRealtime {
       Size: readUInt32(bytes, 10 + symbolLength),
       Timestamp: readUInt64(bytes, 14 + symbolLength),
       TotalVolume: readUInt32(bytes, 22 + symbolLength),
-      SubProvider: this._getSubProvider(bytes[3]),
-      MarketCenter: readString(bytes, 4 + symbolLength, 6 + symbolLength),
+      SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
+      MarketCenter: readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength),
       Condition: conditionLength > 0 ? readString(bytes, 27 + symbolLength, 27 + symbolLength + conditionLength) : ""
     }
   }
@@ -269,8 +281,8 @@ class IntrinioRealtime {
       Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 6 + symbolLength),
       Size: readUInt32(bytes, 10 + symbolLength),
       Timestamp: readUInt64(bytes, 14 + symbolLength),
-      SubProvider: this._getSubProvider(bytes[3]),
-      MarketCenter: readString(bytes, 4 + symbolLength, 6 + symbolLength),
+      SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
+      MarketCenter: readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength),
       Condition: conditionLength > 0 ? readString(bytes, 23 + symbolLength, 23 + symbolLength + conditionLength) : ""
     }
   }
