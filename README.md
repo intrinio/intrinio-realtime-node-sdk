@@ -151,7 +151,10 @@ There are thousands of securities, each with their own feed of activity.  We hig
   Price: 150.99,
   Size: 20,
   Timestamp: 1637092835566268084,
-  TotalVolume: 2728543
+  TotalVolume: 2728543, 
+  SubProvider: "IEX",
+  MarketCenter: "",
+  Condition: ""
 }
 ```
 
@@ -160,6 +163,16 @@ There are thousands of securities, each with their own feed of activity.  We hig
 * **Size** - The number of shares exchanged on the last trade
 * **TotalVolume** - The total number of shares traded so far today, for the given symbol
 * **Timestamp** - A unix timestamp (the number of nanoseconds since the unix epoch)
+* **SubProvider** - Denotes the detailed source within grouped sources.
+  *    **`NONE`** - No subtype specified.
+  *    **`CTA_A`** - CTA_A in the DELAYED_SIP provider.
+  *    **`CTA_B`** - CTA_B in the DELAYED_SIP provider.
+  *    **`UTP`** - UTP in the DELAYED_SIP provider.
+  *    **`OTC`** - OTC in the DELAYED_SIP provider.
+  *    **`NASDAQ_BASIC`** - NASDAQ Basic in the NASDAQ_BASIC provider.
+  *    **`IEX`** - From the IEX exchange in the REALTIME provider.
+* **MarketCenter** - Provides the market center
+* **Condition** - Provides the condition
 
 #### Quote Message
 
@@ -169,7 +182,10 @@ There are thousands of securities, each with their own feed of activity.  We hig
   Type: 1,
   Price: 2994.78,
   Size: 105,
-  Timestamp: 1637092847907710010
+  Timestamp: 1637092847907710010,
+  SubProvider: "IEX",
+  MarketCenter: "",
+  Condition: ""
 }
 ```
 
@@ -180,6 +196,16 @@ There are thousands of securities, each with their own feed of activity.  We hig
 * **Price** - The price in USD
 * **Size** - The size of the last ask or bid
 * **Timestamp** - A unix timestamp (the number of nanoseconds since the unix epoch)
+* **SubProvider** - Denotes the detailed source within grouped sources.
+  *    **`NONE`** - No subtype specified.
+  *    **`CTA_A`** - CTA_A in the DELAYED_SIP provider.
+  *    **`CTA_B`** - CTA_B in the DELAYED_SIP provider.
+  *    **`UTP`** - UTP in the DELAYED_SIP provider.
+  *    **`OTC`** - OTC in the DELAYED_SIP provider.
+  *    **`NASDAQ_BASIC`** - NASDAQ Basic in the NASDAQ_BASIC provider.
+  *    **`IEX`** - From the IEX exchange in the REALTIME provider.
+* **MarketCenter** - Provides the market center
+* **Condition** - Provides the condition
 
 ## API Keys
 You will receive your Intrinio API Key after [creating an account](https://intrinio.com/signup). You will need a subscription to the [Real-Time Data Feed](https://intrinio.com/real-time-multi-exchange) as well.
