@@ -11,7 +11,7 @@ function sleep(ms) {
 }
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv4.2";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.0";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 
@@ -353,7 +353,7 @@ class IntrinioRealtime {
           xhr.overrideMimeType("text/html");
           xhr.setRequestHeader('Content-Type', 'application/json');
           xhr.setRequestHeader('Authorization', 'Public ' + this._accessKey);
-          xhr.setRequestHeader('Client-Information', "IntrinioRealtimeWebSDKv4.2.0");
+          xhr.setRequestHeader(CLIENT_INFO_HEADER_KEY, CLIENT_INFO_HEADER_VALUE);
           xhr.send();
         }
         catch (error) {
