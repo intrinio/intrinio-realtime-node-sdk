@@ -5,7 +5,7 @@ SDK for working with Intrinio's realtime Multi-Exchange prices feed. Intrinio’
 [Intrinio](https://intrinio.com/) provides real-time stock prices via a two-way WebSocket connection. To get started, [subscribe to a real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) and follow the instructions below.
 
 ## Requirements
-- NodeJS 16.13.0 (for NodeJS usage), or
+- NodeJS 20.7.0 (for NodeJS usage), or
 - A modern web browser and web server (for vanilla JS usage)
 
 ## Docker

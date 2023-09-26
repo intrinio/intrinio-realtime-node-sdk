@@ -2,7 +2,7 @@
   "name": "intrinio-realtime",
   "version": "5.0.0",
   "engines": {
-    "node": ">=16.13.0"
+    "node": ">=20.7.0"
   },
   "description": "Intrinio SDK for Real-Time Stock Prices",
   "main": "index.js",
