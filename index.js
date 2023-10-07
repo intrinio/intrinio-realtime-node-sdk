@@ -127,6 +127,16 @@ const defaultConfig = {
   isPublicKey: false
 };
 
+const defaultReplayConfig = {
+  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  ipAddress: undefined,
+  tradesOnly: false,
+  isPublicKey: false,
+  replayDate: '2023-10-01',
+  replayAsIfLive: true,
+  replayDeleteFileWhenDone: true
+};
+
 class IntrinioRealtime {
   constructor(accessKey, onTrade, onQuote, config = {}) {
     this._accessKey = accessKey;
@@ -647,6 +657,231 @@ class IntrinioRealtime {
     console.log("Intrinio Realtime Client - Websocket closing");
     if (this._websocket) {
       this._websocket.close(1000, "Terminated by client");
+    }
+  }
+
+  getTotalMsgCount() {
+    return this._msgCount;
+  }
+}
+
+class IntrinioRealtimeReplayClient {
+  constructor(accessKey, onTrade, onQuote, config = {}) {
+    this._accessKey = accessKey;
+    this._config = Object.assign(defaultReplayConfig, config);
+    this._msgCount = 0;
+    this._channels = new Map();
+    this._onTrade = (onTrade && (typeof onTrade === "function")) ? onTrade : (_) => {};
+    this._onQuote = (onQuote && (typeof onQuote === "function")) ? onQuote : (_) => {};
+    this._float32Array = new Float32Array(1);
+    this._backingByteArray = new Uint8Array(this._float32Array.buffer);
+
+    if ((!this._accessKey) || (this._accessKey === "")) {
+      throw "Intrinio Replay Client - Access Key is required";
+    }
+
+    if (!this._config.provider) {
+      throw "Intrinio Replay Client - 'config.provider' must be specified";
+    }
+    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "DELAYED_SIP") && (this._config.provider !== "NASDAQ_BASIC")) {
+      throw "Intrinio Replay Client - 'config.provider' must be either 'REALTIME' or 'DELAYED_SIP' or 'NASDAQ_BASIC'";
+    }
+
+    if(!onTrade) {
+      throw "Intrinio Replay Client - 'onTrade' callback is required";
+    }
+
+    if(!onQuote){
+      this._config.tradesOnly = true;
+    }
+  }
+
+  _getApiReplayUrls() {
+    switch(this._config.provider) {
+      case "REALTIME":
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=iex&date=" + this._config.replayDate + "api_key=" + this._accessKey];
+      case "DELAYED_SIP":
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=utp_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
+                "https://api-v2.intrinio.com/securities/replay?subsource=cta_a_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
+                "https://api-v2.intrinio.com/securities/replay?subsource=cta_b_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
+                "https://api-v2.intrinio.com/securities/replay?subsource=otc_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
+        ];
+      case "NASDAQ_BASIC":
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=nasdaq_basic&date=" + this._config.replayDate + "api_key=" + this._accessKey];
+      default: throw "Intrinio Replay Client - 'config.provider' not specified!";
+    }
+  }
+
+  _getMessageType(val){
+    switch(val) {
+      case 0:
+        return 'Trade';
+        break;
+      case 1:
+        return 'Ask';
+        break;
+      case 2:
+        return 'Bid';
+        break;
+      default:
+        return '';
+        break;
+    }
+  }
+
+  _getSubProvider(val){
+    switch(val) {
+      case 0:
+        return 'NONE';
+        break;
+      case 1:
+        return 'CTA_A';
+        break;
+      case 2:
+        return 'CTA_B';
+        break;
+      case 3:
+        return 'UTP';
+        break;
+      case 4:
+        return 'OTC';
+        break;
+      case 5:
+        return 'NASDAQ_BASIC';
+        break;
+      case 6:
+        return 'IEX';
+        break;
+      default:
+        return 'NONE';
+        break;
+    }
+  }
+
+  _parseTrade(bytes) {
+    let symbolLength = bytes[2];
+    let conditionLength = bytes[26 + symbolLength];
+    return {
+      Type: this._getMessageType(bytes[0]),
+      Symbol: readString(bytes, 3, 3 + symbolLength),
+      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 6 + symbolLength),
+      Size: readUInt32(bytes, 10 + symbolLength),
+      Timestamp: readUInt64(bytes, 14 + symbolLength),
+      TotalVolume: readUInt32(bytes, 22 + symbolLength),
+      SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
+      MarketCenter: readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength),
+      Condition: conditionLength > 0 ? readString(bytes, 27 + symbolLength, 27 + symbolLength + conditionLength) : ""
+    }
+  }
+
+  _parseQuote (bytes) {
+    let symbolLength = bytes[2];
+    let conditionLength = bytes[22 + symbolLength];
+    return {
+      Type: this._getMessageType(bytes[0]),
+      Symbol: readString(bytes, 3, 3 + symbolLength),
+      Price: readFloat32(bytes, this._float32Array, this._backingByteArray, 6 + symbolLength),
+      Size: readUInt32(bytes, 10 + symbolLength),
+      Timestamp: readUInt64(bytes, 14 + symbolLength),
+      SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
+      MarketCenter: readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength),
+      Condition: conditionLength > 0 ? readString(bytes, 23 + symbolLength, 23 + symbolLength + conditionLength) : ""
+    }
+  }
+
+  _parseSocketMessage(data) {
+    let bytes = new Uint8Array(data);
+    let msgCount = bytes[0];
+    let startIndex = 1;
+    for (let i = 0; i < msgCount; i++) {
+      let msgType = bytes[startIndex]
+      let msgLength = bytes[startIndex + 1]
+      let endIndex = startIndex + msgLength
+      let chunk = bytes.slice(startIndex, endIndex)
+      switch(msgType) {
+        case 0:
+          let trade = this._parseTrade(chunk)
+          this._onTrade(trade)
+          break;
+        case 1:
+        case 2:
+          let quote = this._parseQuote(chunk)
+          this._onQuote(quote)
+          break;
+        default: console.warn("Intrinio Replay Client - Invalid message type: %i", msgType)
+      }
+      startIndex = endIndex
+    }
+  }
+
+  _join(symbol, tradesOnly) {
+    if (this._channels.has("$lobby")) {
+      console.warn("Intrinio Replay Client - $lobby channel already joined. Other channels not necessary.");
+    }
+    if (!this._channels.has(symbol)) {
+      this._channels.set(symbol, tradesOnly);
+      console.info("Intrinio Replay Client - Joining channel: %s (trades only = %s)", symbol, tradesOnly);
+    }
+  }
+
+  _leave(symbol) {
+    if (this._channels.has(symbol)) {
+      this._channels.delete(symbol);
+      console.info("Intrinio Replay Client - Leaving channel: %s", symbol);
+    }
+  }
+
+  async join(symbols, tradesOnly) {
+    let _tradesOnly = (this._config.tradesOnly ? this._config.tradesOnly : false) || (tradesOnly ? tradesOnly : false);
+    if (symbols instanceof Array) {
+      for (const symbol of symbols) {
+        if (!this._channels.has(symbol)){
+          this._join(symbol, _tradesOnly);
+        }
+      }
+    }
+    else if (typeof symbols === "string") {
+      if (!this._channels.has(symbols)){
+        this._join(symbols, _tradesOnly);
+      }
+    }
+    else if ((typeof tradesOnly !== "undefined") || (typeof tradesOnly !== "boolean")) {
+      console.error("Intrinio Replay Client - If provided, 'tradesOnly' must be of type 'boolean', not '%s'", typeof tradesOnly);
+    }
+    else {
+      console.error("Intrinio Replay Client - Invalid use of 'join'");
+    }
+  }
+
+  leave(symbols) {
+    if (symbols instanceof Array) {
+      for (const symbol of symbols) {
+        if (this._channels.has(symbol)) {
+          this._leave(symbol)
+        }
+      }
+    }
+    else if (typeof symbols === "string") {
+      if (this._channels.has(symbols)) {
+        this._leave(symbols);
+      }
+    }
+    else {
+      if (arguments.length == 0) {
+        for (const channel of this._channels.keys()) {
+          this._leave(channel);
+        }
+      }
+      else {
+        console.error("Intrinio Replay Client - Invalid use of 'leave'");
+      }
+    }
+  }
+
+  async stop() {
+    console.log("Intrinio Replay Client - Leaving subscribed channels");
+    for (const channel of this._channels.keys()) {
+      this._leave(channel);
     }
   }
 
