@@ -1,6 +1,7 @@
 "use strict"
-const Client = require("./index");
-const accessKey = "API_KEY_HERE";
+//const Client = require("./index").RealtimeClient;
+const Client = require("./index").ReplayClient;
+const accessKey = "";
 
 let trades = new Map();
 let quotes = new Map();

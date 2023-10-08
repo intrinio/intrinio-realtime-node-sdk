@@ -128,11 +128,11 @@ const defaultConfig = {
 };
 
 const defaultReplayConfig = {
-  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  provider: 'DELAYED_SIP', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
-  replayDate: '2023-10-01',
+  replayDate: '2023-10-06',
   replayAsIfLive: true,
   replayDeleteFileWhenDone: true
 };
@@ -676,6 +676,10 @@ class IntrinioRealtimeReplayClient {
     this._float32Array = new Float32Array(1);
     this._backingByteArray = new Uint8Array(this._float32Array.buffer);
 
+    if (this._config.isPublicKey){
+      throw "Intrinio Replay Client - Replay Client is only available in a node.js environment.";
+    }
+
     if ((!this._accessKey) || (this._accessKey === "")) {
       throw "Intrinio Replay Client - Access Key is required";
     }
@@ -694,20 +698,141 @@ class IntrinioRealtimeReplayClient {
     if(!onQuote){
       this._config.tradesOnly = true;
     }
+
+    this._start();
+  }
+
+  async _start(){
+    const fs = require('fs');
+    let urls = this._getApiReplayUrls();
+    let responses = [];
+    let filePaths = [];
+
+    //fetch download links and file names
+    for (let i = 0; i < urls.length; i++){
+      try{
+        let apiResponse = await this._getApiDownloadResponse(urls[i]);
+        if (apiResponse !== undefined && apiResponse !== null){ responses.push(apiResponse); }
+      }
+      catch (ex){
+        //not all customers have access to all subsources within a source.  Ignore errors if they don't.
+      }
+    }
+
+    //download the files to a temp dir
+    for (let i = 0; i < responses.length; i++){
+      let filePath = await this._downloadFile(this._decodeUrl(responses[i].url), responses[i].name)
+      if (filePath !== undefined && filePath !== null && filePath !== ""){ filePaths.push(filePath); }
+    }
+
+    //delete files if configured to do so
+    for (let i = 0; i < filePaths.length; i++) {
+      if (this._config.replayDeleteFileWhenDone && fs.existsSync(filePaths[i])){
+        console.log("Intrinio Replay Client - Deleting file: " + filePath);
+        fs.unlinkSync(filePaths[i]); //delete file
+      }
+    }
+  }
+
+  _decodeUrl(url){
+    if (url !== undefined){
+      return url.replace('\u0026', '&');
+    }
+    return url;
+  }
+
+  async _downloadFile(url, fileName){
+    const os = require('os');
+    const fs = require('fs');
+    const https = require('https');
+    const path = require('path');
+    let tempDir = os.tmpdir();
+    let filePath = path.join(tempDir, fileName);
+
+    console.log("Intrinio Replay Client - Starting to download to " + filePath + ".");
+    return new Promise((fulfill, reject) => {
+      try {
+        const request = https.get(url, {}, response => {
+          if (response.statusCode != 200) {
+            console.error("Intrinio Replay Client - Could not download " + fileName + ": Status code (%i)", response.statusCode);
+            reject();
+          }
+          else {
+            const fileStream = fs.createWriteStream(filePath);
+            response.pipe(fileStream);
+            fileStream.on("finish", () => {
+              fileStream.close();
+              console.log("Intrinio Replay Client - Successfully downloaded " + filePath + ".");
+              fulfill(filePath);
+            });
+          }
+        })
+        request.on("timeout", () => {
+          console.error("Intrinio Replay Client - Timed out trying to download " + fileName + ".");
+          reject();
+        });
+        request.on("error", error => {
+          console.error("Intrinio Replay Client - Error downloading  " + fileName + ": (%s)", error);
+          reject();
+        });
+      }
+      catch (error) {
+        console.error("Intrinio Replay Client - Error downloading " + fileName + ": (%s)", error);
+        reject();
+      }
+    });
+  }
+
+  async _getApiDownloadResponse(url) {
+    return new Promise((fulfill, reject) => {
+      try {
+        const protocol = require('https');
+        const request = protocol.get(url, {}, response => {
+          if (response.statusCode != 200) {
+            console.error("Intrinio Replay Client - Could not fetch download URL from API: Status code (%i)", response.statusCode);
+            reject();
+          }
+          else {
+            response.on("data", data => {
+              console.log("Intrinio Replay Client - Successfully fetched download URL from API");
+              let apiResponse = JSON.parse(data);
+              fulfill(apiResponse);
+              //{
+              //  name: "fileName",
+              //  url: "where the file needs to be downloaded from.  Has encoded slashes",
+              //  size: "the size of the file"
+              //}
+            });
+          }
+        })
+        request.on("timeout", () => {
+          console.error("Intrinio Replay Client - Timed out trying to fetched download URL from API.");
+          reject();
+        });
+        request.on("error", error => {
+          console.error("Intrinio Replay Client - Error fetching download URL from API: ", error);
+          reject();
+        });
+      }
+      catch (error) {
+        console.error("Intrinio Replay Client - Error in fetching download URL (%s)", error);
+        reject();
+      }
+    });
   }
 
   _getApiReplayUrls() {
     switch(this._config.provider) {
       case "REALTIME":
-        return ["https://api-v2.intrinio.com/securities/replay?subsource=iex&date=" + this._config.replayDate + "api_key=" + this._accessKey];
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=iex&date=" + this._config.replayDate + "&api_key=" + this._accessKey];
       case "DELAYED_SIP":
-        return ["https://api-v2.intrinio.com/securities/replay?subsource=utp_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
-                "https://api-v2.intrinio.com/securities/replay?subsource=cta_a_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
-                "https://api-v2.intrinio.com/securities/replay?subsource=cta_b_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
-                "https://api-v2.intrinio.com/securities/replay?subsource=otc_delayed&date=" + this._config.replayDate + "api_key=" + this._accessKey,
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=utp_delayed&date=" + this._config.replayDate + "&api_key=" + this._accessKey,
+                "https://api-v2.intrinio.com/securities/replay?subsource=cta_a_delayed&date=" + this._config.replayDate + "&api_key=" + this._accessKey,
+                "https://api-v2.intrinio.com/securities/replay?subsource=cta_b_delayed&date=" + this._config.replayDate + "&api_key=" + this._accessKey,
+                "https://api-v2.intrinio.com/securities/replay?subsource=otc_delayed&date=" + this._config.replayDate + "&api_key=" + this._accessKey,
         ];
       case "NASDAQ_BASIC":
-        return ["https://api-v2.intrinio.com/securities/replay?subsource=nasdaq_basic&date=" + this._config.replayDate + "api_key=" + this._accessKey];
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=nasdaq_basic&date=" + this._config.replayDate + "&api_key=" + this._accessKey];
       default: throw "Intrinio Replay Client - 'config.provider' not specified!";
     }
   }
@@ -891,5 +1016,5 @@ class IntrinioRealtimeReplayClient {
 }
 
 if (typeof window === 'undefined') {
-  module.exports = IntrinioRealtime;
+  module.exports = { RealtimeClient: IntrinioRealtime, ReplayClient: IntrinioRealtimeReplayClient };
 }
