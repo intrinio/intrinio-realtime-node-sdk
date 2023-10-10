@@ -14,6 +14,7 @@ const CLIENT_INFO_HEADER_KEY = "Client-Information";
 const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.0";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
+const EVENT_BUFFER_SIZE = 100;
 
 async function doBackoff(context, callback) {
   let i = 0;
@@ -120,6 +121,117 @@ function writeString(bytes, string, startPos) {
   else bytes.set(encodedString, startPos);
 }
 
+function copyInto(source, destination, destinationStartIndex){
+  for (let i = 0; i < source.length; i++){
+    destination[destinationStartIndex + i] = source[i]
+  }
+}
+
+async function readFileChunk(fileStream, chunkSize, fileIo){
+  const buffer = Buffer.alloc(chunkSize);
+  const buff = await fileIo.read(fileStream, buffer, 0, chunkSize, null);
+  if (buff === undefined || buff === null || buff.bytesRead === 0 || buff.buffer === undefined || buff.buffer === null){
+    return null;
+  }
+  else
+    return buff.buffer;
+}
+
+async function * replayTickFileWithoutDelay(filePath){
+  const fileIo = require('fs').promises;
+
+  if (fileIo.existsSync(filePath)) {
+    const fileStream = await fileIo.open(filePath, 'r');
+    let readResult = await readFileChunk(fileStream, 1, fileIo);
+    while (readResult !== undefined && readResult !== null){
+      let eventBytes= Buffer.alloc(EVENT_BUFFER_SIZE);
+      eventBytes[0] = 1; // This is the number of messages in the group
+      eventBytes[1] = readResult[0]; // This is message type
+      eventBytes[2] = (await readFileChunk(fileStream, 1, fileIo))[0]; // This is message length, including this and the previous byte.
+      copyInto(await readFileChunk(fileStream, eventBytes[2] - 2, fileIo), eventBytes, 3); // read the rest of the message
+      let timeReceivedBytes = await readFileChunk(fileStream, 8, fileIo);
+      let timeReceived = readUInt64(timeReceivedBytes, 0);
+      yield new Tick(timeReceived, eventBytes);
+      readResult = await readFileChunk(fileStream, 1, fileIo);
+    }
+    fileStream.close();
+  }
+  else
+    yield null;
+}
+
+function fillNextTicks(enumerators, nextTicks){
+  for (let i = 0; i < nextTicks.length; i++){
+    if (nextTicks[i] !== undefined && nextTicks[i] !== null){
+      let next = enumerators[i].next();
+      if (!next.done) {
+        nextTicks[i] = next.value;
+      }
+      else{
+        nextTicks[i] = null;
+      }
+    }
+    }
+}
+
+function pullNextTick(nextTicks){
+  let pullIndex = 0;
+  let t = 9223372036854775806;  //max value
+  for (let i = 0; i < nextTicks.length; i++){
+    if (nextTicks[i] !== undefined && nextTicks[i] !== null && nextTicks[i].timeReceived < t){
+      pullIndex = i;
+      t = nextTicks[i].timeReceived;
+    }
+  }
+  let pulledTick = nextTicks[pullIndex];
+  nextTicks[pullIndex] = null;
+  return pulledTick;
+}
+
+function hasAnyValue(nextTicks){
+  let hasValue = false;
+  for (let i = 0; i < nextTicks.length; i++){
+    if (nextTicks[i] !== undefined && nextTicks[i] !== null){
+      hasValue = true;
+    }
+  }
+  return hasValue;
+}
+
+async function * replayFileGroupWithoutDelay(tickGroup) {
+  let nextTicks = Array.apply(null, Array(tickGroup.length));
+  let enumerators = Array.apply(null, Array(tickGroup.length));
+  for (let i = 0; i < tickGroup.length; i++) {
+    enumerators[i] = tickGroup[i]
+  }
+  fillNextTicks(enumerators, nextTicks)
+  while (hasAnyValue(nextTicks)){
+    let nextTick = pullNextTick(nextTicks);
+    if (nextTick !== undefined && nextTick !== null){
+      yield nextTick;
+    }
+    fillNextTicks(enumerators, nextTicks);
+  }
+}
+
+async function * replayFileGroupWithDelay(allTicks){
+  const multiplier = 1000000000;
+  const start = (new Date().getTime()) * multiplier; //getTime returns milliseconds since epoch
+  let offset = 0
+  for (const tick of await replayFileGroupWithoutDelay(allTicks)){
+    if (offset === 0) {
+      offset = start - tick.timeReceived
+    }
+
+    // sleep until the tick happens
+    if ((tick.timeReceived + offset) <= ((new Date().getTime()) * multiplier)) {
+      let sleepTime = (((new Date().getTime()) * multiplier) - (tick.timeReceived + offset)) / multiplier
+      await new Promise(r => setTimeout(r, sleepTime)); //input is milliseconds
+    }
+    yield tick
+  }
+}
+
 const defaultConfig = {
   provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
   ipAddress: undefined,
@@ -134,7 +246,7 @@ const defaultReplayConfig = {
   isPublicKey: false,
   replayDate: '2023-10-06',
   replayAsIfLive: true,
-  replayDeleteFileWhenDone: true
+  replayDeleteFileWhenDone: false
 };
 
 class IntrinioRealtime {
@@ -662,6 +774,13 @@ class IntrinioRealtime {
 
   getTotalMsgCount() {
     return this._msgCount;
+  }
+}
+
+class Tick{
+  constructor(timeReceived, data){
+    this.timeReceived = timeReceived;
+    this.data = data;
   }
 }
 
