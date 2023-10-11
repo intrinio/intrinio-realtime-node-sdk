@@ -821,13 +821,8 @@ class IntrinioRealtimeReplayClient {
     this._start();
   }
 
-  async _start(){
-    const fs = require('fs');
-    let urls = this._getApiReplayUrls();
+  async _getAllApiDownloadResponses(urls){
     let responses = [];
-    let filePaths = [];
-
-    //fetch download links and file names
     for (let i = 0; i < urls.length; i++){
       try{
         let apiResponse = await this._getApiDownloadResponse(urls[i]);
@@ -837,19 +832,59 @@ class IntrinioRealtimeReplayClient {
         //not all customers have access to all subsources within a source.  Ignore errors if they don't.
       }
     }
+    return responses;
+  }
 
+  async _getAllFilePaths(responses){
     //download the files to a temp dir
     for (let i = 0; i < responses.length; i++){
       let filePath = await this._downloadFile(this._decodeUrl(responses[i].url), responses[i].name)
       if (filePath !== undefined && filePath !== null && filePath !== ""){ filePaths.push(filePath); }
     }
+  }
 
-    //delete files if configured to do so
+  _deleteReplayFiles(filePaths){
+    const fs = require('fs');
     for (let i = 0; i < filePaths.length; i++) {
-      if (this._config.replayDeleteFileWhenDone && fs.existsSync(filePaths[i])){
+      if (fs.existsSync(filePaths[i])){
         console.log("Intrinio Replay Client - Deleting file: " + filePath);
         fs.unlinkSync(filePaths[i]); //delete file
       }
+    }
+  }
+
+  _getAllFileIterators(filePaths){
+    let enumerators = [];
+    for (let i = 0; i < filePaths.length; i++){
+      enumerators.push(replayTickFileWithoutDelay(filePaths[i]));
+    }
+    return enumerators;
+  }
+
+  _getAggregateTickIterator(fileGroup){
+    if (this._config.replayAsIfLive){
+      return replayFileGroupWithDelay(fileGroup);
+    }
+    else{
+      return replayFileGroupWithoutDelay(fileGroup);
+    }
+  }
+
+  async _start(){
+
+    let urls = this._getApiReplayUrls();
+    let responses = this._getAllApiDownloadResponses(urls);
+    let filePaths = this._getAllFilePaths(responses);
+    let fileGroup = this._getAllFileIterators(filePaths);
+
+    let aggregatedTickIterator = this._getAggregateTickIterator(fileGroup);
+
+    for (const tick in aggregatedTickIterator) {
+      await this._parseSocketMessage(tick.data);
+    }
+
+    if (this._config.replayDeleteFileWhenDone){
+      this._deleteReplayFiles(filePaths, fs)
     }
   }
 
@@ -1033,7 +1068,7 @@ class IntrinioRealtimeReplayClient {
     }
   }
 
-  _parseSocketMessage(data) {
+  async _parseSocketMessage(data) {
     let bytes = new Uint8Array(data);
     let msgCount = bytes[0];
     let startIndex = 1;
@@ -1045,12 +1080,12 @@ class IntrinioRealtimeReplayClient {
       switch(msgType) {
         case 0:
           let trade = this._parseTrade(chunk)
-          this._onTrade(trade)
+          await this._onTrade(trade)
           break;
         case 1:
         case 2:
           let quote = this._parseQuote(chunk)
-          this._onQuote(quote)
+          await this._onQuote(quote)
           break;
         default: console.warn("Intrinio Replay Client - Invalid message type: %i", msgType)
       }
