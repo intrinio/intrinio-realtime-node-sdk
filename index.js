@@ -127,9 +127,9 @@ function copyInto(source, destination, destinationStartIndex){
   }
 }
 
-async function readFileChunk(fileStream, chunkSize, fileIo){
+async function readFileChunk(fileStream, chunkSize){
   const buffer = Buffer.alloc(chunkSize);
-  const buff = await fileIo.read(fileStream, buffer, 0, chunkSize, null);
+  const buff = await fileStream.read(buffer, 0, chunkSize, null);
   if (buff === undefined || buff === null || buff.bytesRead === 0 || buff.buffer === undefined || buff.buffer === null){
     return null;
   }
@@ -138,21 +138,19 @@ async function readFileChunk(fileStream, chunkSize, fileIo){
 }
 
 async function * replayTickFileWithoutDelay(filePath){
-  const fileIo = require('fs').promises;
-
-  if (fileIo.existsSync(filePath)) {
-    const fileStream = await fileIo.open(filePath, 'r');
-    let readResult = await readFileChunk(fileStream, 1, fileIo);
+  if (require('fs').existsSync(filePath)) {
+    const fileStream = await require('fs').promises.open(filePath, 'r');
+    let readResult = await readFileChunk(fileStream, 1);
     while (readResult !== undefined && readResult !== null){
       let eventBytes= Buffer.alloc(EVENT_BUFFER_SIZE);
       eventBytes[0] = 1; // This is the number of messages in the group
       eventBytes[1] = readResult[0]; // This is message type
-      eventBytes[2] = (await readFileChunk(fileStream, 1, fileIo))[0]; // This is message length, including this and the previous byte.
-      copyInto(await readFileChunk(fileStream, eventBytes[2] - 2, fileIo), eventBytes, 3); // read the rest of the message
-      let timeReceivedBytes = await readFileChunk(fileStream, 8, fileIo);
+      eventBytes[2] = (await readFileChunk(fileStream, 1))[0]; // This is message length, including this and the previous byte.
+      copyInto(await readFileChunk(fileStream, eventBytes[2] - 2), eventBytes, 3); // read the rest of the message
+      let timeReceivedBytes = await readFileChunk(fileStream, 8);
       let timeReceived = readUInt64(timeReceivedBytes, 0);
       yield new Tick(timeReceived, eventBytes);
-      readResult = await readFileChunk(fileStream, 1, fileIo);
+      readResult = await readFileChunk(fileStream, 1);
     }
     fileStream.close();
   }
@@ -160,10 +158,10 @@ async function * replayTickFileWithoutDelay(filePath){
     yield null;
 }
 
-function fillNextTicks(enumerators, nextTicks){
+async function fillNextTicks(enumerators, nextTicks){
   for (let i = 0; i < nextTicks.length; i++){
-    if (nextTicks[i] !== undefined && nextTicks[i] !== null){
-      let next = enumerators[i].next();
+    if (nextTicks[i] === undefined || nextTicks[i] === null){
+      let next = await enumerators[i].next();
       if (!next.done) {
         nextTicks[i] = next.value;
       }
@@ -171,7 +169,7 @@ function fillNextTicks(enumerators, nextTicks){
         nextTicks[i] = null;
       }
     }
-    }
+  }
 }
 
 function pullNextTick(nextTicks){
@@ -199,18 +197,24 @@ function hasAnyValue(nextTicks){
 }
 
 async function * replayFileGroupWithoutDelay(tickGroup) {
-  let nextTicks = Array.apply(null, Array(tickGroup.length));
-  let enumerators = Array.apply(null, Array(tickGroup.length));
+  let nextTicks = Array(tickGroup.length);
+  for(let i = 0; i < tickGroup.length; i++){
+    nextTicks[i] = null;
+  }
+  let enumerators = Array(tickGroup.length);
+  for(let i = 0; i < tickGroup.length; i++){
+    nextTicks[i] = null;
+  }
   for (let i = 0; i < tickGroup.length; i++) {
     enumerators[i] = tickGroup[i]
   }
-  fillNextTicks(enumerators, nextTicks)
+  await fillNextTicks(enumerators, nextTicks)
   while (hasAnyValue(nextTicks)){
     let nextTick = pullNextTick(nextTicks);
     if (nextTick !== undefined && nextTick !== null){
       yield nextTick;
     }
-    fillNextTicks(enumerators, nextTicks);
+    await fillNextTicks(enumerators, nextTicks);
   }
 }
 
@@ -218,7 +222,7 @@ async function * replayFileGroupWithDelay(allTicks){
   const multiplier = 1000000000;
   const start = (new Date().getTime()) * multiplier; //getTime returns milliseconds since epoch
   let offset = 0
-  for (const tick of await replayFileGroupWithoutDelay(allTicks)){
+  for (const tick of await replayFileGroupWithoutDelay(await allTicks)){
     if (offset === 0) {
       offset = start - tick.timeReceived
     }
@@ -245,7 +249,7 @@ const defaultReplayConfig = {
   tradesOnly: false,
   isPublicKey: false,
   replayDate: '2023-10-06',
-  replayAsIfLive: true,
+  replayAsIfLive: false,
   replayDeleteFileWhenDone: false
 };
 
@@ -863,28 +867,34 @@ class IntrinioRealtimeReplayClient {
     return enumerators;
   }
 
-  _getAggregateTickIterator(fileGroup){
+  async _getAggregateTickIterator(fileGroup){
     if (this._config.replayAsIfLive){
-      return replayFileGroupWithDelay(fileGroup);
+      return await replayFileGroupWithDelay(fileGroup);
     }
     else{
-      return replayFileGroupWithoutDelay(fileGroup);
+      return await replayFileGroupWithoutDelay(fileGroup);
     }
   }
 
   async _start(){
     let urls = await this._getApiReplayUrls();
-    let responses = await this._getAllApiDownloadResponses(urls);    console.log("got responses");
+    let responses = await this._getAllApiDownloadResponses(urls);
     let filePaths = await this._getAllFilePaths(responses);
     let fileGroup = await this._getAllFileIterators(filePaths);
 
     let aggregatedTickIterator = await this._getAggregateTickIterator(fileGroup);
 
-    for (const tick in aggregatedTickIterator) {
-      await this._parseSocketMessage(tick.data);
+    console.log("Starting to read files...")
+
+    let next = await aggregatedTickIterator.next();
+    await this._parseSocketMessage(next.value.data);
+    while(!next.done){
+      next = await aggregatedTickIterator.next();
+      await this._parseSocketMessage(next.value.data);
     }
 
     if (this._config.replayDeleteFileWhenDone){
+      console.log("cleaning up files");
       this._deleteReplayFiles(filePaths, fs)
     }
   }
@@ -952,11 +962,6 @@ class IntrinioRealtimeReplayClient {
               let apiResponse = JSON.parse(data);
               console.log("Intrinio Replay Client - Successfully fetched download URL from API");
               fulfill(apiResponse);
-              //{
-              //  name: "fileName",
-              //  url: "where the file needs to be downloaded from.  Has encoded slashes",
-              //  size: "the size of the file"
-              //}
             });
           }
         })
