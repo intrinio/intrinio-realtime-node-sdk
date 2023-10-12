@@ -836,11 +836,13 @@ class IntrinioRealtimeReplayClient {
   }
 
   async _getAllFilePaths(responses){
+    let filePaths = [];
     //download the files to a temp dir
     for (let i = 0; i < responses.length; i++){
       let filePath = await this._downloadFile(this._decodeUrl(responses[i].url), responses[i].name)
       if (filePath !== undefined && filePath !== null && filePath !== ""){ filePaths.push(filePath); }
     }
+    return filePaths;
   }
 
   _deleteReplayFiles(filePaths){
@@ -853,10 +855,10 @@ class IntrinioRealtimeReplayClient {
     }
   }
 
-  _getAllFileIterators(filePaths){
+  async _getAllFileIterators(filePaths){
     let enumerators = [];
     for (let i = 0; i < filePaths.length; i++){
-      enumerators.push(replayTickFileWithoutDelay(filePaths[i]));
+      enumerators.push(await replayTickFileWithoutDelay(filePaths[i]));
     }
     return enumerators;
   }
@@ -871,13 +873,12 @@ class IntrinioRealtimeReplayClient {
   }
 
   async _start(){
+    let urls = await this._getApiReplayUrls();
+    let responses = await this._getAllApiDownloadResponses(urls);    console.log("got responses");
+    let filePaths = await this._getAllFilePaths(responses);
+    let fileGroup = await this._getAllFileIterators(filePaths);
 
-    let urls = this._getApiReplayUrls();
-    let responses = this._getAllApiDownloadResponses(urls);
-    let filePaths = this._getAllFilePaths(responses);
-    let fileGroup = this._getAllFileIterators(filePaths);
-
-    let aggregatedTickIterator = this._getAggregateTickIterator(fileGroup);
+    let aggregatedTickIterator = await this._getAggregateTickIterator(fileGroup);
 
     for (const tick in aggregatedTickIterator) {
       await this._parseSocketMessage(tick.data);
@@ -948,8 +949,8 @@ class IntrinioRealtimeReplayClient {
           }
           else {
             response.on("data", data => {
-              console.log("Intrinio Replay Client - Successfully fetched download URL from API");
               let apiResponse = JSON.parse(data);
+              console.log("Intrinio Replay Client - Successfully fetched download URL from API");
               fulfill(apiResponse);
               //{
               //  name: "fileName",
