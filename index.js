@@ -954,7 +954,7 @@ class IntrinioRealtimeReplayClient {
         const protocol = require('https');
         const request = protocol.get(url, {}, response => {
           if (response.statusCode != 200) {
-            console.error("Intrinio Replay Client - Could not fetch download URL from API: Status code (%i)", response.statusCode);
+            //console.error("Intrinio Replay Client - Could not fetch download URL from API: Status code (%i)", response.statusCode);
             reject();
           }
           else {
@@ -966,7 +966,7 @@ class IntrinioRealtimeReplayClient {
           }
         })
         request.on("timeout", () => {
-          console.error("Intrinio Replay Client - Timed out trying to fetched download URL from API.");
+          //console.error("Intrinio Replay Client - Timed out trying to fetched download URL from API.");
           reject();
         });
         request.on("error", error => {
