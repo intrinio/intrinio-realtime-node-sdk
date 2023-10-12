@@ -1,6 +1,24 @@
 "use strict"
-const Client = require("./index");
-const accessKey = "API_KEY_HERE";
+const Client = require("./index").RealtimeClient;
+//const Client = require("./index").ReplayClient;
+const accessKey = "";
+
+const config = {
+    provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+    ipAddress: undefined,
+    tradesOnly: false,
+    isPublicKey: false
+};
+
+// const config = { //replay config
+//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     ipAddress: undefined,
+//     tradesOnly: false,
+//     isPublicKey: false,
+//     replayDate: '2023-10-06',
+//     replayAsIfLive: false,
+//     replayDeleteFileWhenDone: true
+// };
 
 let trades = new Map();
 let quotes = new Map();
@@ -35,15 +53,23 @@ function onQuote(quote) {
     else quotes.set(key, 1);
 }
 
-let client = new Client(accessKey, onTrade, onQuote);
-client.join("AAPL", false);
+let client = new Client(accessKey, onTrade, onQuote, config);
+await client.join("AAPL", false); //use $lobby for firehose.
 
 setInterval(() => {
     if (maxTradeCount > 0) {
-        console.log("Most active security (by trade frequency): %s (%i updates)", maxCountTrade, maxTradeCount);
+        console.log("Most active security (by trade frequency): %s (%i updates)", JSON.stringify(maxCountTrade, (key, value) =>
+            typeof value === 'bigint'
+                ? value.toString()
+                : value // return everything else unchanged
+        ), maxTradeCount);
     }
     if (maxQuoteCount > 0) {
-        console.log("Most active security (by quote frequency): %s (%i updates)", maxCountQuote, maxQuoteCount);
+        console.log("Most active security (by quote frequency): %s (%i updates)", JSON.stringify(maxCountQuote, (key, value) =>
+            typeof value === 'bigint'
+                ? value.toString()
+                : value // return everything else unchanged
+        ), maxQuoteCount);
     }
     let totalMsgCount = client.getTotalMsgCount();
     if (totalMsgCount > 0) {

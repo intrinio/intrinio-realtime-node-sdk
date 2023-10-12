@@ -1,4 +1,4 @@
-FROM node:16.13.0
+FROM node:20.7.0
 
 RUN mkdir /intrinio
 
