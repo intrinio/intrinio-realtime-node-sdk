@@ -219,20 +219,25 @@ async function * replayFileGroupWithoutDelay(tickGroup) {
 }
 
 async function * replayFileGroupWithDelay(allTicks){
-  const multiplier = 1000000000;
-  const start = (new Date().getTime()) * multiplier; //getTime returns milliseconds since epoch
-  let offset = 0
-  for (const tick of await replayFileGroupWithoutDelay(await allTicks)){
-    if (offset === 0) {
-      offset = start - tick.timeReceived
-    }
+  const multiplier = BigInt(1000000);
+  const start = BigInt(new Date().getTime()) * multiplier; //getTime returns milliseconds since epoch
+  let offset = BigInt(0);
 
+  let aggregatedTickIterator = await replayFileGroupWithoutDelay(allTicks);
+  let next = await aggregatedTickIterator.next();
+  if (offset === BigInt(0)) {
+    offset = start - next.value.timeReceived;
+  }
+  yield next.value;
+  while(!next.done){
+    next = await aggregatedTickIterator.next();
     // sleep until the tick happens
-    if ((tick.timeReceived + offset) <= ((new Date().getTime()) * multiplier)) {
-      let sleepTime = (((new Date().getTime()) * multiplier) - (tick.timeReceived + offset)) / multiplier
-      await new Promise(r => setTimeout(r, sleepTime)); //input is milliseconds
+    const now = BigInt(new Date().getTime()) * multiplier;
+    if ((next.value.timeReceived + offset) <= now) {
+      let sleepTime = (now - (next.value.timeReceived + offset)) / multiplier
+      await new Promise(r => setTimeout(r, Number(sleepTime))); //input is milliseconds
     }
-    yield tick
+    yield next.value
   }
 }
 
@@ -244,13 +249,13 @@ const defaultConfig = {
 };
 
 const defaultReplayConfig = {
-  provider: 'DELAYED_SIP', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
   replayDate: '2023-10-06',
   replayAsIfLive: false,
-  replayDeleteFileWhenDone: false
+  replayDeleteFileWhenDone: true
 };
 
 class IntrinioRealtime {
@@ -1085,13 +1090,17 @@ class IntrinioRealtimeReplayClient {
       let chunk = bytes.slice(startIndex, endIndex)
       switch(msgType) {
         case 0:
-          let trade = this._parseTrade(chunk)
-          await this._onTrade(trade)
+          let trade = this._parseTrade(chunk);
+          if (this._channels.has("$lobby") || this._channels.has(trade.Symbol)) {
+            await this._onTrade(trade);
+          }
           break;
         case 1:
         case 2:
-          let quote = this._parseQuote(chunk)
-          await this._onQuote(quote)
+          let quote = this._parseQuote(chunk);
+          if ((!this._config.tradesOnly) && (this._channels.has("$lobby") || this._channels.has(quote.Symbol))) {
+            await this._onQuote(quote);
+          }
           break;
         default: console.warn("Intrinio Replay Client - Invalid message type: %i", msgType)
       }

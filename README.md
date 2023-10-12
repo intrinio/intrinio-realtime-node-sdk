@@ -67,77 +67,180 @@ npm install intrinio-realtime --save
 
 ## Example Usage (NodeJS)
 ```javascript
-const IntrinioRealtimeClient = require('intrinio-realtime')
-const accessKey = ""
-const provider = "REALTIME" // or "DELAYED_SIP" or "NASDAQ_BASIC"
+"use strict"
+const Client = require("./index").RealtimeClient;
+//const Client = require("./index").ReplayClient;
+const accessKey = "";
+
 const config = {
-  tradesOnly: true,
-}
+  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  ipAddress: undefined,
+  tradesOnly: false,
+  isPublicKey: false
+};
 
-let trades = new Map()
-let quotes = new Map()
-let maxTradeCount = 0
-let maxCountTrade = null
-let maxQuoteCount = 0
-let maxCountQuote = null
+// const config = { //replay config
+//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     ipAddress: undefined,
+//     tradesOnly: false,
+//     isPublicKey: false,
+//     replayDate: '2023-10-06',
+//     replayAsIfLive: false,
+//     replayDeleteFileWhenDone: true
+// };
 
-// Set up a callback for trades
-// This keeps track of the most active ticker symbol (by trade frequency)
+let trades = new Map();
+let quotes = new Map();
+let maxTradeCount = 0;
+let maxCountTrade = null;
+let maxQuoteCount = 0;
+let maxCountQuote = null;
+
 function onTrade(trade) {
-  let key = trade.Symbol
+  let key = trade.Symbol;
   if (trades.has(key)) {
-    let value = trades.get(key)
+    let value = trades.get(key);
     if (value + 1 > maxTradeCount) {
-      trades.set(key, value + 1)
-      maxTradeCount = value + 1
-      maxCountTrade = trade
+      trades.set(key, value + 1);
+      maxTradeCount = value + 1;
+      maxCountTrade = trade;
     }
   }
-  else trades.set(key, 1)
+  else trades.set(key, 1);
 }
 
-// Set up a callback for quotes
-// This keeps track of the most active ticker symbol (by quote frequency)
 function onQuote(quote) {
-  let key = quote.Symbol + ":" + quote.Type
+  let key = quote.Symbol + ":" + quote.Type;
   if (quotes.has(key)) {
-    let value = quotes.get(key)
+    let value = quotes.get(key);
     if (value + 1 > maxQuoteCount) {
-      quotes.set(key, value + 1)
-      maxQuoteCount = value + 1
-      maxCountQuote = quote
+      quotes.set(key, value + 1);
+      maxQuoteCount = value + 1;
+      maxCountQuote = quote;
     }
   }
-  else quotes.set(key, 1)
+  else quotes.set(key, 1);
 }
 
-// Create an IntrinioRealtimeClient instance
-// 'accessKey', 'provider', and 'onTrade' are required.
-const client = new Client(accessKey, provider, onTrade, onQuote, config)
+let client = new Client(accessKey, onTrade, onQuote, config);
+await client.join("AAPL", false); //use $lobby for firehose.
 
-// Join channels
-client.join(["AAPL", "MSFT", "GOOG"])
-
-// Set up a timer to print out tracked metrics every 10 seconds
 setInterval(() => {
-    if (maxTradeCount > 0) {
-        console.log("Most active security (by trade frequency): %s (%i updates)", maxCountTrade, maxTradeCount)
-    }
-    if (maxQuoteCount > 0) {
-        console.log("Most active security (by quote frequency): %s (%i updates)", maxCountQuote, maxQuoteCount)
-    }
-    let totalMsgCount = client.getTotalMsgCount()
-    if (totalMsgCount > 0) {
-        console.log("Total updates received = %i", totalMsgCount)
-    }
-    else {
-        console.log("No updates")
-    }
-}, 10000)
+  if (maxTradeCount > 0) {
+    console.log("Most active security (by trade frequency): %s (%i updates)", JSON.stringify(maxCountTrade, (key, value) =>
+            typeof value === 'bigint'
+                    ? value.toString()
+                    : value // return everything else unchanged
+    ), maxTradeCount);
+  }
+  if (maxQuoteCount > 0) {
+    console.log("Most active security (by quote frequency): %s (%i updates)", JSON.stringify(maxCountQuote, (key, value) =>
+            typeof value === 'bigint'
+                    ? value.toString()
+                    : value // return everything else unchanged
+    ), maxQuoteCount);
+  }
+  let totalMsgCount = client.getTotalMsgCount();
+  if (totalMsgCount > 0) {
+    console.log("Total updates received = %i", totalMsgCount);
+  }
+  else {
+    console.log("No updates");
+  }
+}, 10000);
 
 ```
 
-For another example, see the `realtime.js` file. Make sure to use your API key as the `accessKey` parameter.
+Make sure to use your API key as the `accessKey` parameter.
+
+## Example Replay Client Usage (NodeJS) 
+Used to replay a specific day's data by downloading the replay file from the REST API and then playing it back.
+```javascript
+"use strict"
+//const Client = require("./index").RealtimeClient;
+const Client = require("./index").ReplayClient;
+const accessKey = "";
+
+// const config = {
+//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     ipAddress: undefined,
+//     tradesOnly: false,
+//     isPublicKey: false
+// };
+
+const config = { //replay config
+  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  ipAddress: undefined,
+  tradesOnly: false,
+  isPublicKey: false,
+  replayDate: '2023-10-06',
+  replayAsIfLive: false,
+  replayDeleteFileWhenDone: true
+};
+
+let trades = new Map();
+let quotes = new Map();
+let maxTradeCount = 0;
+let maxCountTrade = null;
+let maxQuoteCount = 0;
+let maxCountQuote = null;
+
+function onTrade(trade) {
+  let key = trade.Symbol;
+  if (trades.has(key)) {
+    let value = trades.get(key);
+    if (value + 1 > maxTradeCount) {
+      trades.set(key, value + 1);
+      maxTradeCount = value + 1;
+      maxCountTrade = trade;
+    }
+  }
+  else trades.set(key, 1);
+}
+
+function onQuote(quote) {
+  let key = quote.Symbol + ":" + quote.Type;
+  if (quotes.has(key)) {
+    let value = quotes.get(key);
+    if (value + 1 > maxQuoteCount) {
+      quotes.set(key, value + 1);
+      maxQuoteCount = value + 1;
+      maxCountQuote = quote;
+    }
+  }
+  else quotes.set(key, 1);
+}
+
+let client = new Client(accessKey, onTrade, onQuote, config);
+await client.join("AAPL", false); //use $lobby for firehose.
+
+setInterval(() => {
+  if (maxTradeCount > 0) {
+    console.log("Most active security (by trade frequency): %s (%i updates)", JSON.stringify(maxCountTrade, (key, value) =>
+            typeof value === 'bigint'
+                    ? value.toString()
+                    : value // return everything else unchanged
+    ), maxTradeCount);
+  }
+  if (maxQuoteCount > 0) {
+    console.log("Most active security (by quote frequency): %s (%i updates)", JSON.stringify(maxCountQuote, (key, value) =>
+            typeof value === 'bigint'
+                    ? value.toString()
+                    : value // return everything else unchanged
+    ), maxQuoteCount);
+  }
+  let totalMsgCount = client.getTotalMsgCount();
+  if (totalMsgCount > 0) {
+    console.log("Total updates received = %i", totalMsgCount);
+  }
+  else {
+    console.log("No updates");
+  }
+}, 10000);
+
+```
+
+Make sure to use your API key as the `accessKey` parameter, and changing the `replayDate` parameter
 
 ## Handling Quotes
 
