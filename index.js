@@ -11,7 +11,7 @@ function sleep(ms) {
 }
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.1";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.2";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 const EVENT_BUFFER_SIZE = 100;
@@ -239,6 +239,33 @@ async function * replayFileGroupWithDelay(allTicks){
     }
     yield next.value
   }
+}
+
+function writeCsvHeaderRow(csvWriter){
+  csvWriter.write("\"Type\",\"Symbol\",\"Price\",\"Size\",\"Timestamp\",\"TotalVolume\",\"SubProvider\",\"MarketCenter\",\"Condition\"\r\n");
+}
+
+function writeCsvTradeRow(csvWriter, trade){
+  csvWriter.write(`\"${trade.Type}\",\"${trade.Symbol}\",\"${trade.Price}\",\"${trade.Size}\",\"${trade.Timestamp.toString()}\",\"${trade.TotalVolume}\",\"${trade.SubProvider}\",\"${trade.MarketCenter}\",\"${trade.Condition}\"\r\n`);
+}
+
+function writeCsvQuoteRow(csvWriter, quote){
+  csvWriter.write(`\"${quote.Type}\",\"${quote.Symbol}\",\"${quote.Price}\",\"${quote.Size}\",\"${quote.Timestamp.toString()}\",\"\",\"${quote.SubProvider}\",\"${quote.MarketCenter}\",\"${quote.Condition}\"\r\n`);
+}
+
+async function replayToCsv(outputFilePath, config, channels, tradesOnly, apiKey){
+  console.log("Creating file " + outputFilePath);
+  let csvWriter = require('fs').createWriteStream(outputFilePath, {flags: 'a'});
+  writeCsvHeaderRow(csvWriter);
+  function onTrade(trade){
+    writeCsvTradeRow(csvWriter, trade);
+  }
+  function onQuote(quote){
+    writeCsvQuoteRow(csvWriter, quote);
+  }
+
+  let client = await new this.ReplayClient(apiKey, onTrade, onQuote, config);
+  await client.join(channels, tradesOnly);
 }
 
 const defaultConfig = {
@@ -1185,5 +1212,5 @@ class IntrinioRealtimeReplayClient {
 }
 
 if (typeof window === 'undefined') {
-  module.exports = { RealtimeClient: IntrinioRealtime, ReplayClient: IntrinioRealtimeReplayClient };
+  module.exports = { RealtimeClient: IntrinioRealtime, ReplayClient: IntrinioRealtimeReplayClient, replayToCsv: replayToCsv };
 }

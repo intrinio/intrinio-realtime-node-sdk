@@ -1,7 +1,7 @@
 "use strict"
 const Client = require("./index").RealtimeClient;
 //const Client = require("./index").ReplayClient;
-const accessKey = "";
+const accessKey = "API_KEY_HERE";
 
 const config = {
     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
@@ -55,6 +55,7 @@ function onQuote(quote) {
 
 let client = new Client(accessKey, onTrade, onQuote, config);
 await client.join("AAPL", false); //use $lobby for firehose.
+//require("./index").replayToCsv("outputFilePath.csv", config, ["$lobby"], false, accessKey)
 
 setInterval(() => {
     if (maxTradeCount > 0) {
