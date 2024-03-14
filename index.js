@@ -11,7 +11,7 @@ function sleep(ms) {
 }
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.2";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.3";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 const EVENT_BUFFER_SIZE = 100;
@@ -417,6 +417,8 @@ class IntrinioRealtime {
   _parseTrade(bytes) {
     let symbolLength = bytes[2];
     let conditionLength = bytes[26 + symbolLength];
+    let marketCenter = readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength);
+    let isDarkpool = (!marketCenter) || marketCenter == "\0" || marketCenter == "D" || marketCenter == "E" || marketCenter.trim().length === 0;
     return {
       Type: this._getMessageType(bytes[0]),
       Symbol: readString(bytes, 3, 3 + symbolLength),
@@ -425,8 +427,9 @@ class IntrinioRealtime {
       Timestamp: readUInt64(bytes, 14 + symbolLength),
       TotalVolume: readUInt32(bytes, 22 + symbolLength),
       SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
-      MarketCenter: readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength),
-      Condition: conditionLength > 0 ? readString(bytes, 27 + symbolLength, 27 + symbolLength + conditionLength) : ""
+      MarketCenter: marketCenter,
+      Condition: conditionLength > 0 ? readString(bytes, 27 + symbolLength, 27 + symbolLength + conditionLength) : "",
+      IsDarkpool: isDarkpool
     }
   }
 

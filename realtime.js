@@ -54,7 +54,7 @@ function onQuote(quote) {
 }
 
 let client = new Client(accessKey, onTrade, onQuote, config);
-await client.join("AAPL", false); //use $lobby for firehose.
+client.join("AAPL", false); //use $lobby for firehose.
 //require("./index").replayToCsv("outputFilePath.csv", config, ["$lobby"], false, accessKey)
 
 setInterval(() => {
