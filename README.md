@@ -68,7 +68,7 @@ npm install intrinio-realtime --save
 ## Example Usage (NodeJS)
 ```javascript
 "use strict"
-const Client = require("./index").RealtimeClient;
+const Client = require("intrinio-realtime").RealtimeClient;;
 //const Client = require("./index").ReplayClient;
 const accessKey = "";
 
