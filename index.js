@@ -2,7 +2,7 @@
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf8");
-const unicodeDecoder = new TextDecoder("utf-16be");
+const unicodeDecoder = new TextDecoder("utf-16le");
 
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000];
 
@@ -436,6 +436,7 @@ class IntrinioRealtime {
   _parseQuote (bytes) {
     let symbolLength = bytes[2];
     let conditionLength = bytes[22 + symbolLength];
+    let marketCenter = readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength);
     return {
       Type: this._getMessageType(bytes[0]),
       Symbol: readString(bytes, 3, 3 + symbolLength),
@@ -443,7 +444,7 @@ class IntrinioRealtime {
       Size: readUInt32(bytes, 10 + symbolLength),
       Timestamp: readUInt64(bytes, 14 + symbolLength),
       SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
-      MarketCenter: readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength),
+      MarketCenter: marketCenter,
       Condition: conditionLength > 0 ? readString(bytes, 23 + symbolLength, 23 + symbolLength + conditionLength) : ""
     }
   }
