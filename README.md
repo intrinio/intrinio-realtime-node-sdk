@@ -1,12 +1,11 @@
 # Intrinio Web and NodeJS SDK for Real-Time Stock Prices
 
-SDK for working with Intrinio's realtime Multi-Exchange prices feed. Intrinio’s Multi-Exchange feed bridges the gap by merging real-time equity pricing from the IEX and MEMX exchanges. Get a comprehensive view with increased market volume and enjoy no exchange fees, no per-user requirements, no permissions or authorizations, and little to no paperwork.
+SDK for working with Intrinio's realtime Multi-Exchange prices feed. Intrinio’s feed provides flexibility by providing the same interface from the IEX, NASDAQ Basic, and delayed SIP sources.
 
 [Intrinio](https://intrinio.com/) provides real-time stock prices via a two-way WebSocket connection. To get started, [subscribe to a real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) and follow the instructions below.
 
 ## Requirements
-- NodeJS 20.7.0 (for NodeJS usage), or
-- A modern web browser and web server (for vanilla JS usage)
+- NodeJS 20.7.0 (for NodeJS usage)
 
 ## Docker
 Add your API key to the realtime.js file, then
@@ -21,44 +20,6 @@ docker compose run client
 * Subscribe to updates from individual securities
 * Subscribe to updates for all securities
 * Multiple sources of data - REALTIME or DELAYED_SIP or NASDAQ_BASIC
-
-## Script
-To use the Web SDK (non-NodeJS), include the `index.js` script (found in this repository) at the end of your `<body>` tag:
-
-```html
-<script src='index.js' type='text/javascript'></script>
-```
-
-## Example Usage (Web)
-```javascript
-const accessKey = ""
-
-function onTrade(trade) {
-  let tradeElement = $.parseHTML('<div>' + trade.Symbol + '(trade): $' + trade.Price + '</div>')
-  $('.container').prepend(tradeElement)
-}
-
-function onQuote(quote) {
-  let quoteType = null
-  if (quote.Type === 1) quoteType = "ask"
-  else if (quote.Type === 2) quoteType = "bid"
-  let quoteElement = $.parseHTML('<div>' + quote.Symbol + '(' + quote.Type + '): $' + quote.Price + '</div>')
-  $('.container').prepend(quoteElement)
-}
-
-let config = {
-  isPublicKey: true
-}
-
-let client = new IntrinioRealtime(accessKey, onTrade, onQuote, config)
-
-client.join("GOOG", true)
-```
-
-For another example, see the `/sample` folder. Make sure to substitute your own Public Access Key.
-
-## Public Access Key
-You can create a Public Access Key after [creating an account](https://intrinio.com/signup). On your Account page, scroll down to Access Keys, click Add New Key, name it, and specify Public. The key will appear on your Account page, which you will need for to use the SDK. You will also need a subscription to a [real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) for one of the providers listed below.
 
 ## NodeJS Installation
 ```
@@ -355,3 +316,43 @@ client.leave("GE")
 client.leave("$lobby")
 client.leave()
 ```
+
+## Web Page Usage (DEPRECIATED)
+To use the Web SDK (non-NodeJS), include the `index.js` script (found in this repository) at the end of your `<body>` tag:
+
+```html
+<script src='index.js' type='text/javascript'></script>
+```
+and use/create the public access key (NOT your normal API Key) from your account page.
+
+## Example Usage (Web)
+```javascript
+const accessKey = ""
+
+function onTrade(trade) {
+  let tradeElement = $.parseHTML('<div>' + trade.Symbol + '(trade): $' + trade.Price + '</div>')
+  $('.container').prepend(tradeElement)
+}
+
+function onQuote(quote) {
+  let quoteType = null
+  if (quote.Type === 1) quoteType = "ask"
+  else if (quote.Type === 2) quoteType = "bid"
+  let quoteElement = $.parseHTML('<div>' + quote.Symbol + '(' + quote.Type + '): $' + quote.Price + '</div>')
+  $('.container').prepend(quoteElement)
+}
+
+let config = {
+  isPublicKey: true
+}
+
+let client = new IntrinioRealtime(accessKey, onTrade, onQuote, config)
+
+client.join("GOOG", true)
+```
+
+For another example, see the `/sample` folder. Make sure to substitute your own Public Access Key.
+
+## Public Access Key
+You can create a Public Access Key after [creating an account](https://intrinio.com/signup). On your Account page, scroll down to Access Keys, click Add New Key, name it, and specify Public. The key will appear on your Account page, which you will need for to use the SDK. You will also need a subscription to a [real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) for one of the providers listed below.
+
