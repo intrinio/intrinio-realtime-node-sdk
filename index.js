@@ -615,7 +615,10 @@ class IntrinioRealtime {
         try {
           console.info("Intrinio Realtime Client - Websocket initializing (public key)");
           let wsUrl = this._getWebSocketUrl();
-          this._websocket = new WebSocket(wsUrl);
+          this._websocket = new WebSocket(wsUrl, {}, {headers: {
+              [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE,
+              [MESSAGE_VERSION_HEADER_KEY]: MESSAGE_VERSION_HEADER_VALUE
+            }});
           this._websocket.binaryType = "arraybuffer";
           this._websocket.onopen = () => {
             console.log("Intrinio Realtime Client - Websocket connected (public key)");
