@@ -11,7 +11,7 @@ function sleep(ms) {
 }
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.3";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.4";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 const EVENT_BUFFER_SIZE = 100;
