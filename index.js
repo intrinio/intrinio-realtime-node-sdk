@@ -333,7 +333,7 @@ class IntrinioRealtime {
                 process.on('SIGINT', () => {
                   console.log("Intrinio Realtime Client - Shutdown detected");
                   this.stop();
-                  process.kill(process.pid, 'SIGINT');})
+                  process.kill(process.pid, 'SIGTERM');})
               }
             },
             () => {console.error("Intrinio Realtime Client - Startup failed. Unable to establish websocket connection.");})},
