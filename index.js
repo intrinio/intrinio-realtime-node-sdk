@@ -418,7 +418,23 @@ class IntrinioRealtime {
     let symbolLength = bytes[2];
     let conditionLength = bytes[26 + symbolLength];
     let marketCenter = readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength);
-    let isDarkpool = (!marketCenter) || marketCenter == "\0" || marketCenter == "D" || marketCenter == "E" || marketCenter.trim().length === 0;
+    let subProvider = this._getSubProvider(bytes[3 + symbolLength]);
+    let isDarkpool = false;
+    switch(marketCenter) {
+      case 'CTA_A':
+      case 'CTA_B':
+      case 'UTP':
+      case 'OTC':
+        isDarkpool = (!marketCenter) || marketCenter == "\0" || marketCenter == "D" || marketCenter == "E" || marketCenter.trim().length === 0;
+        break;
+      case 'NASDAQ_BASIC':
+        isDarkpool = (!marketCenter) || marketCenter == "\0" || marketCenter == "L" || marketCenter == "2" || marketCenter.trim().length === 0;
+        break;
+      default:
+        isDarkpool = false;
+        break;
+    }
+
     return {
       Type: this._getMessageType(bytes[0]),
       Symbol: readString(bytes, 3, 3 + symbolLength),
@@ -426,7 +442,7 @@ class IntrinioRealtime {
       Size: readUInt32(bytes, 10 + symbolLength),
       Timestamp: readUInt64(bytes, 14 + symbolLength),
       TotalVolume: readUInt32(bytes, 22 + symbolLength),
-      SubProvider: this._getSubProvider(bytes[3 + symbolLength]),
+      SubProvider: subProvider,
       MarketCenter: marketCenter,
       Condition: conditionLength > 0 ? readString(bytes, 27 + symbolLength, 27 + symbolLength + conditionLength) : "",
       IsDarkpool: isDarkpool
