@@ -4,14 +4,15 @@ const Client = require("./index").RealtimeClient;
 const accessKey = "API_KEY_HERE";
 
 const config = {
-    provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+    provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
     ipAddress: undefined,
     tradesOnly: false,
-    isPublicKey: false
+    isPublicKey: false,
+    delayed: false //set to true if you have realtime access and want to force delayed mode. Otherwise, if you only have delayed, you'll get delayed not matter if you set this or not.
 };
 
 // const config = { //replay config
-//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false,
