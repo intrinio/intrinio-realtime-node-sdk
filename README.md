@@ -19,7 +19,7 @@ docker compose run client
 * Receive streaming, real-time price quotes (last trade, bid, ask)
 * Subscribe to updates from individual securities
 * Subscribe to updates for all securities
-* Multiple sources of data - REALTIME or DELAYED_SIP or NASDAQ_BASIC
+* Multiple sources of data - IEX/REALTIME, DELAYED_SIP, NASDAQ_BASIC, or CBOE_ONE
 
 ## NodeJS Installation
 ```
@@ -35,14 +35,14 @@ const Client = require("./index").RealtimeClient; //local development
 const accessKey = "";
 
 const config = {
-  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false
 };
 
 // const config = { //replay config
-//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false,
@@ -115,6 +115,104 @@ setInterval(() => {
 
 Make sure to use your API key as the `accessKey` parameter.
 
+## Data Format
+
+### Equities Trade Conditions
+
+| Value | Description                                       |
+|-------|---------------------------------------------------|
+| @     | Regular Sale                                      |
+| A     | Acquisition                                       |
+| B     | Bunched Trade                                     |
+| C     | Cash Sale                                         |
+| D     | Distribution                                      |
+| E     | Placeholder                                       |
+| F     | Intermarket Sweep                                 |
+| G     | Bunched Sold Trade                                |
+| H     | Priced Variation Trade                            |
+| I     | Odd Lot Trade                                     |
+| K     | Rule 155 Trade (AMEX)                             |
+| L     | Sold Last                                         |
+| M     | Market Center Official Close                      |
+| N     | Next Day                                          |
+| O     | Opening Prints                                    |
+| P     | Prior Reference Price                             |
+| Q     | Market Center Official Open                       |
+| R     | Seller                                            |
+| S     | Split Trade                                       |
+| T     | Form T                                            |
+| U     | Extended Trading Hours (Sold Out of Sequence)     |
+| V     | Contingent Trade                                  |
+| W     | Average Price Trade                               |
+| X     | Cross/Periodic Auction Trade                      |
+| Y     | Yellow Flag Regular Trade                         |
+| Z     | Sold (Out of Sequence)                            |
+| 1     | Stopped Stock (Regular Trade)                     |
+| 4     | Derivatively Priced                               |
+| 5     | Re-Opening Prints                                 |
+| 6     | Closing Prints                                    |
+| 7     | Qualified Contingent Trade (QCT)                  |
+| 8     | Placeholder for 611 Exempt                        |
+| 9     | Corrected Consolidated Close (Per Listing Market) |
+
+
+### Equities Trade Conditions (CBOE One)
+Trade conditions for CBOE One are represented as the integer representation of a bit flag.
+
+None                      = 0,
+UpdateHighLowConsolidated = 1,
+UpdateLastConsolidated    = 2,
+UpdateHighLowMarketCenter = 4,
+UpdateLastMarketCenter    = 8,
+UpdateVolumeConsolidated  = 16,
+OpenConsolidated          = 32,
+OpenMarketCenter          = 64,
+CloseConsolidated         = 128,
+CloseMarketCenter         = 256,
+UpdateVolumeMarketCenter  = 512
+
+
+### Equities Quote Conditions
+
+| Value | Description                                 |
+|-------|---------------------------------------------|
+| R     | Regular                                     |
+| A     | Slow on Ask                                 |
+| B     | Slow on Bid                                 |
+| C     | Closing                                     |
+| D     | News Dissemination                          |
+| E     | Slow on Bid (LRP or Gap Quote)              |
+| F     | Fast Trading                                |
+| G     | Trading Range Indication                    |
+| H     | Slow on Bid and Ask                         |
+| I     | Order Imbalance                             |
+| J     | Due to Related - News Dissemination         |
+| K     | Due to Related - News Pending               |
+| O     | Open                                        |
+| L     | Closed                                      |
+| M     | Volatility Trading Pause                    |
+| N     | Non-Firm Quote                              |
+| O     | Opening                                     |
+| P     | News Pending                                |
+| S     | Due to Related                              |
+| T     | Resume                                      |
+| U     | Slow on Bid and Ask (LRP or Gap Quote)      |
+| V     | In View of Common                           |
+| W     | Slow on Bid and Ask (Non-Firm)              |
+| X     | Equipment Changeover                        |
+| Y     | Sub-Penny Trading                           |
+| Z     | No Open / No Resume                         |
+| 1     | Market Wide Circuit Breaker Level 1         |
+| 2     | Market Wide Circuit Breaker Level 2         |        
+| 3     | Market Wide Circuit Breaker Level 3         |
+| 4     | On Demand Intraday Auction                  |        
+| 45    | Additional Information Required (CTS)       |      
+| 46    | Regulatory Concern (CTS)                    |     
+| 47    | Merger Effective                            |    
+| 49    | Corporate Action (CTS)                      |   
+| 50    | New Security Offering (CTS)                 |  
+| 51    | Intraday Indicative Value Unavailable (CTS) |
+
 ## Example Replay Client Usage (NodeJS) 
 Used to replay a specific day's data by downloading the replay file from the REST API and then playing it back.
 ```javascript
@@ -124,14 +222,14 @@ const Client = require("./index").ReplayClient;
 const accessKey = "";
 
 // const config = {
-//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false
 // };
 
 const config = { //replay config
-  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
@@ -236,6 +334,7 @@ There are thousands of securities, each with their own feed of activity.  We hig
   *    **`OTC`** - OTC in the DELAYED_SIP provider.
   *    **`NASDAQ_BASIC`** - NASDAQ Basic in the NASDAQ_BASIC provider.
   *    **`IEX`** - From the IEX exchange in the REALTIME provider.
+  *    **`CBOE_ONE`** - From the CBOE One exchanges provider.
 * **MarketCenter** - Provides the market center
 * **Condition** - Provides the condition
 
@@ -269,6 +368,7 @@ There are thousands of securities, each with their own feed of activity.  We hig
   *    **`OTC`** - OTC in the DELAYED_SIP provider.
   *    **`NASDAQ_BASIC`** - NASDAQ Basic in the NASDAQ_BASIC provider.
   *    **`IEX`** - From the IEX exchange in the REALTIME provider.
+  *    **`CBOE_ONE`** - From the CBOE One exchanges provider.
 * **MarketCenter** - Provides the market center
 * **Condition** - Provides the condition
 
@@ -354,5 +454,5 @@ client.join("GOOG", true)
 For another example, see the `/sample` folder. Make sure to substitute your own Public Access Key.
 
 ## Public Access Key
-You can create a Public Access Key after [creating an account](https://intrinio.com/signup). On your Account page, scroll down to Access Keys, click Add New Key, name it, and specify Public. The key will appear on your Account page, which you will need for to use the SDK. You will also need a subscription to a [real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) for one of the providers listed below.
+You can create a Public Access Key after [creating an account](https://intrinio.com/signup). On your Account page, scroll down to Access Keys, click Add New Key, name it, and specify Public. The key will appear on your Account page, which you will need for to use the SDK. You will also need a subscription to a [real-time data feed](https://intrinio.com/marketplace/data/prices/realtime) for one of the providers listed below.  You may also need to contact support to set up CORS. This data access pattern is not recommended for obvious security and rate limitation purposes.
 

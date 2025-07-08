@@ -4,14 +4,14 @@ const Client = require("./index").RealtimeClient;
 const accessKey = "API_KEY_HERE";
 
 const config = {
-    provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+    provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
     ipAddress: undefined,
     tradesOnly: false,
     isPublicKey: false
 };
 
 // const config = { //replay config
-//     provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false,

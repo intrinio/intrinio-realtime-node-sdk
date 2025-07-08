@@ -280,7 +280,7 @@ const defaultReplayConfig = {
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
-  replayDate: '2023-10-06',
+  replayDate: '2025-01-08',
   replayAsIfLive: false,
   replayDeleteFileWhenDone: true
 };
@@ -345,6 +345,9 @@ class IntrinioRealtime {
       case "REALTIME":
         if (this._config.isPublicKey) return "https://realtime-mx.intrinio.com/auth";
         else return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey;
+      case "IEX":
+        if (this._config.isPublicKey) return "https://realtime-mx.intrinio.com/auth";
+        else return "https://realtime-mx.intrinio.com/auth?api_key=" + this._accessKey;
       case "DELAYED_SIP":
         if (this._config.isPublicKey) return "https://realtime-delayed-sip.intrinio.com/auth";
         else return "https://realtime-delayed-sip.intrinio.com/auth?api_key=" + this._accessKey;
@@ -364,6 +367,7 @@ class IntrinioRealtime {
   _getWebSocketUrl() {
     switch(this._config.provider) {
       case "REALTIME": return `wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
+      case "IEX": return `wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       case "DELAYED_SIP": return `wss://realtime-delayed-sip.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       case "NASDAQ_BASIC": return `wss://realtime-nasdaq-basic.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       case "CBOE_ONE": return `wss://cboe-one.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
@@ -1041,6 +1045,8 @@ class IntrinioRealtimeReplayClient {
   _getApiReplayUrls() {
     switch(this._config.provider) {
       case "REALTIME":
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=iex&date=" + this._config.replayDate + "&api_key=" + this._accessKey];
+      case "IEX":
         return ["https://api-v2.intrinio.com/securities/replay?subsource=iex&date=" + this._config.replayDate + "&api_key=" + this._accessKey];
       case "DELAYED_SIP":
         return ["https://api-v2.intrinio.com/securities/replay?subsource=utp_delayed&date=" + this._config.replayDate + "&api_key=" + this._accessKey,
