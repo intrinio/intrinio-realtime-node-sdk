@@ -269,14 +269,14 @@ async function replayToCsv(outputFilePath, config, channels, tradesOnly, apiKey)
 }
 
 const defaultConfig = {
-  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  provider: 'IEX', //IEX (same as) REALTIME, or DELAYED_SIP, or NASDAQ_BASIC, or CBOE_ONE, or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false
 };
 
 const defaultReplayConfig = {
-  provider: 'REALTIME', //REALTIME or DELAYED_SIP or NASDAQ_BASIC or MANUAL
+  provider: 'IEX', //IEX (same as) REALTIME, or DELAYED_SIP, or NASDAQ_BASIC, or CBOE_ONE, or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
@@ -308,9 +308,9 @@ class IntrinioRealtime {
     if (!this._config.provider) {
       throw "Intrinio Realtime Client - 'config.provider' must be specified";
     }
-    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")
+    else if ((this._config.provider !== "IEX") && (this._config.provider !== "CBOE_ONE") && (this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")
         && (this._config.provider !== "DELAYED_SIP") && (this._config.provider !== "NASDAQ_BASIC")) {
-      throw "Intrinio Realtime Client - 'config.provider' must be either 'REALTIME' or 'MANUAL' or 'DELAYED_SIP' or 'NASDAQ_BASIC'";
+      throw "Intrinio Realtime Client - 'config.provider' must be either 'IEX' or 'REALTIME' or 'CBOE_ONE' or 'MANUAL' or 'DELAYED_SIP' or 'NASDAQ_BASIC'";
     }
 
     if ((this._config.provider === "MANUAL") && ((!this._config.ipAddress) || (this._config.ipAddress === ""))) {
@@ -351,6 +351,9 @@ class IntrinioRealtime {
       case "NASDAQ_BASIC":
         if (this._config.isPublicKey) return "https://realtime-nasdaq-basic.intrinio.com/auth";
         else return "https://realtime-nasdaq-basic.intrinio.com/auth?api_key=" + this._accessKey;
+      case "CBOE_ONE":
+        if (this._config.isPublicKey) return "https://cboe-one.intrinio.com/auth";
+        else return "https://cboe-one.intrinio.com/auth?api_key=" + this._accessKey;
       case "MANUAL":
         if (this._config.isPublicKey) return "http://" + this._config.ipAddress + "/auth";
         else return "http://" + this._config.ipAddress + "/auth?api_key=" + this._accessKey;
@@ -363,6 +366,7 @@ class IntrinioRealtime {
       case "REALTIME": return `wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       case "DELAYED_SIP": return `wss://realtime-delayed-sip.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       case "NASDAQ_BASIC": return `wss://realtime-nasdaq-basic.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
+      case "CBOE_ONE": return `wss://cboe-one.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       case "MANUAL": return "ws://" + this._config.ipAddress + `/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}`;
       default: throw "Intrinio Realtime Client - 'config.provider' not specified!";
     }
@@ -407,6 +411,9 @@ class IntrinioRealtime {
         break;
       case 6:
         return 'IEX';
+        break;
+      case 7:
+        return 'CBOE_ONE';
         break;
       default:
         return 'NONE';
@@ -859,8 +866,9 @@ class IntrinioRealtimeReplayClient {
     if (!this._config.provider) {
       throw "Intrinio Replay Client - 'config.provider' must be specified";
     }
-    else if ((this._config.provider !== "REALTIME") && (this._config.provider !== "DELAYED_SIP") && (this._config.provider !== "NASDAQ_BASIC")) {
-      throw "Intrinio Replay Client - 'config.provider' must be either 'REALTIME' or 'DELAYED_SIP' or 'NASDAQ_BASIC'";
+    else if ((this._config.provider !== "IEX") && (this._config.provider !== "CBOE_ONE") && (this._config.provider !== "REALTIME") && (this._config.provider !== "MANUAL")
+          && (this._config.provider !== "DELAYED_SIP") && (this._config.provider !== "NASDAQ_BASIC")) {
+        throw "Intrinio Replay Client - 'config.provider' must be either 'IEX' or 'REALTIME' or 'CBOE_ONE' or 'MANUAL' or 'DELAYED_SIP' or 'NASDAQ_BASIC'";
     }
 
     if(!onTrade) {
@@ -1042,6 +1050,8 @@ class IntrinioRealtimeReplayClient {
         ];
       case "NASDAQ_BASIC":
         return ["https://api-v2.intrinio.com/securities/replay?subsource=nasdaq_basic&date=" + this._config.replayDate + "&api_key=" + this._accessKey];
+      case "CBOE_ONE":
+        return ["https://api-v2.intrinio.com/securities/replay?subsource=cboe_one&date=" + this._config.replayDate + "&api_key=" + this._accessKey];
       default: throw "Intrinio Replay Client - 'config.provider' not specified!";
     }
   }
@@ -1085,6 +1095,9 @@ class IntrinioRealtimeReplayClient {
         break;
       case 6:
         return 'IEX';
+        break;
+      case 7:
+        return 'CBOE_ONE';
         break;
       default:
         return 'NONE';
