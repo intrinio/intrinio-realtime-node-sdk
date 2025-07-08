@@ -366,7 +366,7 @@ class IntrinioRealtime {
   }
 
   _getWebSocketUrl() {
-    let delayed_part = this.config.delayed ? "&delayed=true" : "";
+    let delayed_part = this._config.delayed ? "&delayed=true" : "";
 
     switch(this._config.provider) {
       case "REALTIME": return `wss://realtime-mx.intrinio.com/socket/websocket?vsn=1.0.0&token=${this._token}&${CLIENT_INFO_HEADER_KEY}=${CLIENT_INFO_HEADER_VALUE}&${MESSAGE_VERSION_HEADER_KEY}=${MESSAGE_VERSION_HEADER_VALUE}${delayed_part}`;
