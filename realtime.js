@@ -7,7 +7,8 @@ const config = {
     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
     ipAddress: undefined,
     tradesOnly: false,
-    isPublicKey: false
+    isPublicKey: false,
+    delayed: false //set to true if you have realtime access and want to force delayed mode. Otherwise, if you only have delayed, you'll get delayed not matter if you set this or not.
 };
 
 // const config = { //replay config
