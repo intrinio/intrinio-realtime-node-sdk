@@ -11,7 +11,7 @@ function sleep(ms) {
 }
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.4";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.6";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 const EVENT_BUFFER_SIZE = 100;
@@ -434,7 +434,7 @@ class IntrinioRealtime {
     let marketCenter = readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength);
     let subProvider = this._getSubProvider(bytes[3 + symbolLength]);
     let isDarkpool = false;
-    switch(marketCenter) {
+    switch(subProvider) {
       case 'CTA_A':
       case 'CTA_B':
       case 'UTP':
