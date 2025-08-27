@@ -434,7 +434,7 @@ class IntrinioRealtime {
     let marketCenter = readUnicodeString(bytes, 4 + symbolLength, 6 + symbolLength);
     let subProvider = this._getSubProvider(bytes[3 + symbolLength]);
     let isDarkpool = false;
-    switch(marketCenter) {
+    switch(subProvider) {
       case 'CTA_A':
       case 'CTA_B':
       case 'UTP':
