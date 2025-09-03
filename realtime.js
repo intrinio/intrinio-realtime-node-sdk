@@ -4,7 +4,7 @@ const Client = require("./index").RealtimeClient;
 const accessKey = "API_KEY_HERE";
 
 const config = {
-    provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
+    provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, EQUITIES_EDGE, or MANUAL
     ipAddress: undefined,
     tradesOnly: false,
     isPublicKey: false,
@@ -12,7 +12,7 @@ const config = {
 };
 
 // const config = { //replay config
-//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, EQUITIES_EDGE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false,

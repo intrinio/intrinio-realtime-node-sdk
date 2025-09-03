@@ -19,7 +19,7 @@ docker compose run client
 * Receive streaming, real-time price quotes (last trade, bid, ask)
 * Subscribe to updates from individual securities
 * Subscribe to updates for all securities
-* Multiple sources of data - IEX/REALTIME, DELAYED_SIP, NASDAQ_BASIC, or CBOE_ONE
+* Multiple sources of data - IEX/REALTIME, DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or Equities Edge
 
 ## NodeJS Installation
 ```
@@ -35,7 +35,7 @@ const Client = require("./index").RealtimeClient; //local development
 const accessKey = "";
 
 const config = {
-  provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
+  provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, EQUITIES_EDGE, or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
@@ -43,7 +43,7 @@ const config = {
 };
 
 // const config = { //replay config
-//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, EQUITIES_EDGE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false,
@@ -223,7 +223,7 @@ const Client = require("./index").ReplayClient;
 const accessKey = "";
 
 // const config = {
-//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
+//     provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, EQUITIES_EDGE, or MANUAL
 //     ipAddress: undefined,
 //     tradesOnly: false,
 //     isPublicKey: false,
@@ -231,7 +231,7 @@ const accessKey = "";
 // };
 
 const config = { //replay config
-  provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, or MANUAL
+  provider: 'IEX', //IEX, REALTIME (interchangable with IEX), DELAYED_SIP, NASDAQ_BASIC, CBOE_ONE, EQUITIES_EDGE, or MANUAL
   ipAddress: undefined,
   tradesOnly: false,
   isPublicKey: false,
@@ -337,6 +337,7 @@ There are thousands of securities, each with their own feed of activity.  We hig
   *    **`NASDAQ_BASIC`** - NASDAQ Basic in the NASDAQ_BASIC provider.
   *    **`IEX`** - From the IEX exchange in the REALTIME provider.
   *    **`CBOE_ONE`** - From the CBOE One exchanges provider.
+  *    **`EQUITIES_ONE`** - From the Equities Edge provider.
 * **MarketCenter** - Provides the market center
 * **Condition** - Provides the condition
 
@@ -371,6 +372,7 @@ There are thousands of securities, each with their own feed of activity.  We hig
   *    **`NASDAQ_BASIC`** - NASDAQ Basic in the NASDAQ_BASIC provider.
   *    **`IEX`** - From the IEX exchange in the REALTIME provider.
   *    **`CBOE_ONE`** - From the CBOE One exchanges provider.
+  *    **`EQUITIES_ONE`** - From the Equities Edge provider.
 * **MarketCenter** - Provides the market center
 * **Condition** - Provides the condition
 
