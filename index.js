@@ -6,55 +6,57 @@ const unicodeDecoder = new TextDecoder("utf-16le");
 
 const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000];
 const CONNECT_TIMEOUT_MS = 30000;
+const TOKEN_MAX_AGE_MS = 23 * 60 * 60 * 1000;
+const PROCESSING_BATCH_SIZE = 1000;
+const STOP_DRAIN_TIMEOUT_MS = 5000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 const CLIENT_INFO_HEADER_KEY = "Client-Information";
-const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.7";
+const CLIENT_INFO_HEADER_VALUE = "IntrinioRealtimeNodeSDKv5.8";
 const MESSAGE_VERSION_HEADER_KEY = "UseNewEquitiesFormat";
 const MESSAGE_VERSION_HEADER_VALUE = "v2";
 const EVENT_BUFFER_SIZE = 100;
 
-async function doBackoff(context, callback) {
-  let i = 0;
-  let backoff = SELF_HEAL_BACKOFFS[i];
-  while (!context._stopped) {
-    try {
-      await callback.call(context);
-      return;
-    } catch (e) {
-      if (context._stopped)
-        return;
-      console.log("Intrinio Realtime Client - Sleeping for %isec", (backoff/1000));
-      await sleep(backoff);
-      i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1);
-      backoff = SELF_HEAL_BACKOFFS[i];
+class EventQueue {
+  constructor() {
+    this._items = [];
+    this._head = 0;
+  }
+
+  get length() {
+    return this._items.length - this._head;
+  }
+
+  enqueue(item) {
+    this._items.push(item);
+  }
+
+  dequeue() {
+    if (this._head >= this._items.length)
+      return undefined;
+
+    const item = this._items[this._head++];
+    if (this._head >= 1024 && this._head * 2 >= this._items.length) {
+      this._items = this._items.slice(this._head);
+      this._head = 0;
     }
+    return item;
+  }
+
+  clear() {
+    this._items.length = 0;
+    this._head = 0;
   }
 }
 
-async function runConnectionLoop(context) {
-  let i = 0;
-  while (!context._stopped) {
-    try {
-      if ((Date.now() - context._lastReset) > 86400000)
-        await doBackoff(context, context._trySetToken);
-      if (context._stopped)
-        return;
-      await context._resetWebsocket();
-      i = 0;
-      if (context._stopped)
-        return;
-    } catch (e) {
-      if (context._stopped)
-        return;
-      console.log("Intrinio Realtime Client - Sleeping for %isec", (SELF_HEAL_BACKOFFS[i]/1000));
-      await sleep(SELF_HEAL_BACKOFFS[i]);
-      i = Math.min(i + 1, SELF_HEAL_BACKOFFS.length - 1);
-    }
-  }
+function scheduleWork(callback) {
+  if (typeof setImmediate === "function")
+    setImmediate(callback);
+  else
+    setTimeout(callback, 0);
 }
 
 function readString(bytes, startPos, endPos) {
@@ -315,12 +317,24 @@ const defaultReplayConfig = {
 class IntrinioRealtime {
   constructor(accessKey, onTrade, onQuote, config = {}) {
     this._accessKey = accessKey;
-    this._config = Object.assign(defaultConfig, config);
+    this._config = Object.assign({}, defaultConfig, config);
     this._token = null;
+    this._tokenObtainedAt = 0;
     this._websocket = null;
     this._isReady = false;
     this._attemptingReconnect = false;
     this._stopped = false;
+    this._stopPromise = null;
+    this._connectionLoopPromise = null;
+    this._cancelActiveConnection = null;
+    this._failActiveConnection = null;
+    this._cancelBackoff = null;
+    this._cancelAuth = null;
+    this._authRequest = null;
+    this._socketGeneration = 0;
+    this._startupLogged = false;
+    this._sigintHandler = null;
+    this._readyWaiters = new Set();
     this._lastReset = Date.now();
     this._msgCount = 0;
     this._channels = new Map();
@@ -328,6 +342,11 @@ class IntrinioRealtime {
     this._onQuote = (onQuote && (typeof onQuote === "function")) ? onQuote : (_) => {};
     this._float32Array = new Float32Array(1);
     this._backingByteArray = new Uint8Array(this._float32Array.buffer);
+    this._tradeQueue = new EventQueue();
+    this._quoteQueue = new EventQueue();
+    this._queueDrainScheduled = false;
+    this._selfHealBackoffs = SELF_HEAL_BACKOFFS;
+    this._connectTimeoutMs = CONNECT_TIMEOUT_MS;
 
     if ((!this._accessKey) || (this._accessKey === "")) {
       throw "Intrinio Realtime Client - Access Key is required";
@@ -353,10 +372,7 @@ class IntrinioRealtime {
       this._config.tradesOnly = true;
     }
 
-    this._startupLogged = false;
-    doBackoff(this, this._trySetToken).then(
-        () => { runConnectionLoop(this); },
-        () => {console.error("Intrinio Realtime Client - Startup failed. Unable to acquire auth token.");});
+    this._connectionLoopPromise = this._runConnectionLoop();
   }
 
   _getAuthUrl() {
@@ -509,63 +525,138 @@ class IntrinioRealtime {
     let msgCount = bytes[0];
     let startIndex = 1;
     for (let i = 0; i < msgCount; i++) {
-      let msgType = bytes[startIndex]
-      let msgLength = bytes[startIndex + 1]
-      let endIndex = startIndex + msgLength
-      let chunk = bytes.slice(startIndex, endIndex)
+      let msgType = bytes[startIndex];
+      let msgLength = bytes[startIndex + 1];
+      let endIndex = startIndex + msgLength;
+      if (msgLength < 2 || endIndex > bytes.length) {
+        console.warn("Intrinio Realtime Client - Invalid message length: %i", msgLength);
+        break;
+      }
+      let chunk = bytes.slice(startIndex, endIndex);
       switch(msgType) {
         case 0:
-          let trade = this._parseTrade(chunk)
-          this._onTrade(trade)
+          this._tradeQueue.enqueue(this._parseTrade(chunk));
           break;
         case 1:
         case 2:
-          let quote = this._parseQuote(chunk)
-          this._onQuote(quote)
+          this._quoteQueue.enqueue(this._parseQuote(chunk));
           break;
-        default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType)
+        default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType);
       }
-      startIndex = endIndex
+      startIndex = endIndex;
+    }
+    this._scheduleQueueDrain();
+  }
+
+  _scheduleQueueDrain() {
+    if (this._stopped || this._queueDrainScheduled || (this._tradeQueue.length === 0 && this._quoteQueue.length === 0))
+      return;
+
+    this._queueDrainScheduled = true;
+    scheduleWork(() => this._drainEventQueues());
+  }
+
+  _drainEventQueues() {
+    this._queueDrainScheduled = false;
+    if (this._stopped) {
+      this._clearEventQueues();
+      return;
+    }
+
+    let processed = 0;
+    while (processed < PROCESSING_BATCH_SIZE) {
+      let callback;
+      let event;
+      if (this._tradeQueue.length > 0) {
+        callback = this._onTrade;
+        event = this._tradeQueue.dequeue();
+      }
+      else if (this._quoteQueue.length > 0) {
+        callback = this._onQuote;
+        event = this._quoteQueue.dequeue();
+      }
+      else {
+        break;
+      }
+
+      this._invokeCallback(callback, event);
+      processed++;
+    }
+
+    this._scheduleQueueDrain();
+  }
+
+  _invokeCallback(callback, event) {
+    try {
+      const result = callback(event);
+      if (result && typeof result.catch === "function") {
+        result.catch(error => console.error("Intrinio Realtime Client - Event callback failed:", error));
+      }
+    }
+    catch (error) {
+      console.error("Intrinio Realtime Client - Event callback failed:", error);
     }
   }
 
+  _clearEventQueues() {
+    this._tradeQueue.clear();
+    this._quoteQueue.clear();
+  }
+
   _trySetToken() {
-    if (this._config.isPublicKey)
+    if (this._config.isPublicKey) {
       return new Promise((fulfill, reject) => {
+        let settled = false;
+        let xhr = null;
+        const cancel = () => fail(new Error("Auth request canceled"));
+        const succeed = token => {
+          if (settled) return;
+          settled = true;
+          if (this._authRequest === xhr) this._authRequest = null;
+          if (this._cancelAuth === cancel) this._cancelAuth = null;
+          this._token = token;
+          this._tokenObtainedAt = Date.now();
+          console.log("Intrinio Realtime Client - Authorized (public key)");
+          fulfill();
+        };
+        const fail = error => {
+          if (settled) return;
+          settled = true;
+          if (this._authRequest === xhr) this._authRequest = null;
+          if (this._cancelAuth === cancel) this._cancelAuth = null;
+          reject(error instanceof Error ? error : new Error("Unable to acquire auth token"));
+        };
         try {
           console.log("Intrinio Realtime Client - Authorizing (public key)...");
           const url = this._getAuthUrl();
-          const xhr = new XMLHttpRequest();
-          //TODO - add header
+          xhr = new XMLHttpRequest();
+          this._authRequest = xhr;
+          this._cancelAuth = cancel;
+          xhr.timeout = this._connectTimeoutMs;
           xhr.onerror = (error) => {
             console.error("Intrinio Realtime Client - Error getting public key auth token: ", error);
-            reject();
+            fail(error);
           };
           xhr.ontimeout = () => {
             console.error("Intrinio Realtime Client - Timed out trying to get auth token.");
-            reject();
+            fail(new Error("Auth request timed out"));
           };
           xhr.onabort = () => {
-            console.error("Intrinio Realtime Client - Aborted attempt to get auth token.");
-            reject();
+            fail(new Error("Auth request aborted"));
           };
           xhr.onreadystatechange = () => {
             if (xhr.readyState === 4) {
               if (xhr.status === 401) {
                 console.error("Intrinio Realtime Client - Unable to authorize (public key)");
-                reject();
+                fail(new Error("Unable to authorize"));
               }
               else if (xhr.status !== 200) {
                 console.error("Intrinio Realtime Client - Could not get public key auth token: Status code (%i)", xhr.status);
-                reject();
+                fail(new Error(`Auth request failed with status ${xhr.status}`));
               }
-              else {
-                console.log("Intrinio Realtime Client - Authorized (public key)");
-                this._token = xhr.responseText;
-                fulfill();
-              }
+              else succeed(xhr.responseText);
             }
-          }
+          };
           xhr.open("GET", url, true);
           xhr.overrideMimeType("text/html");
           xhr.setRequestHeader('Content-Type', 'application/json');
@@ -575,51 +666,87 @@ class IntrinioRealtime {
         }
         catch (error) {
           console.error("Intrinio Realtime Client - Error in authorization (%s)", error);
-          reject();
-        }
-      })
-    else
-      return new Promise((fulfill, reject) => {
-        try {
-          const protocol = (this._config.provider === "MANUAL") ? require('http') : require('https');
-          console.log("Intrinio Realtime Client - Authorizing...");
-          const url = this._getAuthUrl();
-          const options = {
-            headers: {
-              [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE
-            }
-          };
-          const request = protocol.get(url, options, response => {
-            if (response.statusCode == 401) {
-              console.error("Intrinio Realtime Client - Unable to authorize");
-              reject();
-            }
-            else if (response.statusCode != 200) {
-              console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode);
-              reject();
-            }
-            else {
-              response.on("data", data => {
-                this._token = decoder.decode(data);
-                console.log("Intrinio Realtime Client - Authorized");
-                fulfill();
-              });
-            }
-          })
-          request.on("timeout", () => {
-            console.error("Intrinio Realtime Client - Timed out trying to get auth token.");
-            reject();
-          });
-          request.on("error", error => {
-            console.error("Intrinio Realtime Client - Error getting auth token: ", error);
-            reject();
-          });
-        }
-        catch (error) {
-          console.error("Intrinio Realtime Client - Error in authorization (%s)", error);
-          reject();
+          fail(error);
         }
       });
+    }
+
+    return new Promise((fulfill, reject) => {
+      let settled = false;
+      let request = null;
+      const cancel = () => fail(new Error("Auth request canceled"));
+      const succeed = token => {
+        if (settled) return;
+        settled = true;
+        if (this._authRequest === request) this._authRequest = null;
+        if (this._cancelAuth === cancel) this._cancelAuth = null;
+        this._token = token;
+        this._tokenObtainedAt = Date.now();
+        console.log("Intrinio Realtime Client - Authorized");
+        fulfill();
+      };
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        if (this._authRequest === request) this._authRequest = null;
+        if (this._cancelAuth === cancel) this._cancelAuth = null;
+        reject(error instanceof Error ? error : new Error("Unable to acquire auth token"));
+      };
+
+      try {
+        const protocol = (this._config.provider === "MANUAL") ? require('http') : require('https');
+        console.log("Intrinio Realtime Client - Authorizing...");
+        const url = this._getAuthUrl();
+        const options = {
+          headers: {
+            [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE
+          }
+        };
+        request = protocol.get(url, options, response => {
+          if (response.statusCode === 401) {
+            console.error("Intrinio Realtime Client - Unable to authorize");
+            if (typeof response.resume === "function") response.resume();
+            fail(new Error("Unable to authorize"));
+            return;
+          }
+          if (response.statusCode !== 200) {
+            console.error("Intrinio Realtime Client - Could not get auth token: Status code (%i)", response.statusCode);
+            if (typeof response.resume === "function") response.resume();
+            fail(new Error(`Auth request failed with status ${response.statusCode}`));
+            return;
+          }
+
+          const chunks = [];
+          response.on("data", data => chunks.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
+          response.on("end", () => succeed(Buffer.concat(chunks).toString("utf8")));
+          response.on("error", fail);
+        });
+        this._authRequest = request;
+        this._cancelAuth = cancel;
+        if (typeof request.setTimeout === "function") {
+          request.setTimeout(this._connectTimeoutMs, () => {
+            const error = new Error("Auth request timed out");
+            console.error("Intrinio Realtime Client - Timed out trying to get auth token.");
+            if (typeof request.destroy === "function") request.destroy(error);
+            fail(error);
+          });
+        }
+        request.on("error", error => {
+          if (!this._stopped)
+            console.error("Intrinio Realtime Client - Error getting auth token: ", error);
+          fail(error);
+        });
+      }
+      catch (error) {
+        console.error("Intrinio Realtime Client - Error in authorization (%s)", error);
+        fail(error);
+      }
+    });
+  }
+
+  async _ensureToken() {
+    if (!this._token || (Date.now() - this._tokenObtainedAt) >= TOKEN_MAX_AGE_MS)
+      await this._trySetToken();
   }
 
   _makeJoinMessage(tradesOnly, symbol) {
@@ -664,163 +791,260 @@ class IntrinioRealtime {
     }
   }
 
-  _abortWebsocket(ws) {
-    if (!ws)
-      return;
-    try {
-      if (typeof ws.terminate === "function")
-        ws.terminate();
-      else if (typeof ws.close === "function")
-        ws.close();
+  async _runConnectionLoop() {
+    let backoffIndex = 0;
+    while (!this._stopped) {
+      try {
+        await this._ensureToken();
+        if (this._stopped) return;
+        await this._connectOnce();
+        if (this._stopped) return;
+      }
+      catch (error) {
+        if (this._stopped) return;
+        if (error && error.wasOpen) backoffIndex = 0;
+        this._markNotReady();
+        this._attemptingReconnect = true;
+        console.info("Intrinio Realtime Client - Websocket reconnecting...");
+        console.warn("Intrinio Realtime Client - Connection attempt failed: %s", error && error.message ? error.message : error);
+      }
+
+      const backoff = this._selfHealBackoffs[Math.min(backoffIndex, this._selfHealBackoffs.length - 1)];
+      console.log("Intrinio Realtime Client - Sleeping for %isec", backoff / 1000);
+      if (!(await this._sleepForReconnect(backoff))) return;
+      backoffIndex = Math.min(backoffIndex + 1, this._selfHealBackoffs.length - 1);
     }
-    catch (e) {}
+  }
+
+  _sleepForReconnect(milliseconds) {
+    if (this._stopped) return Promise.resolve(false);
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        if (this._cancelBackoff === cancel) this._cancelBackoff = null;
+        resolve(value);
+      };
+      const cancel = () => finish(false);
+      const timeoutId = setTimeout(() => finish(true), milliseconds);
+      this._cancelBackoff = cancel;
+    });
+  }
+
+  _createWebSocket() {
+    const wsUrl = this._getWebSocketUrl();
+    if (this._config.isPublicKey) {
+      console.info("Intrinio Realtime Client - Websocket initializing (public key)");
+      return new WebSocket(wsUrl);
+    }
+
+    console.info("Intrinio Realtime Client - Websocket initializing");
+    const WebSocketClient = require('ws');
+    return new WebSocketClient(wsUrl, {
+      perMessageDeflate: false,
+      handshakeTimeout: this._connectTimeoutMs,
+      headers: {
+        [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE,
+        [MESSAGE_VERSION_HEADER_KEY]: MESSAGE_VERSION_HEADER_VALUE
+      }
+    });
+  }
+
+  _connectOnce() {
+    return new Promise((fulfill, reject) => {
+      let socket;
+      let opened = false;
+      let settled = false;
+      let timeoutId = null;
+      const generation = ++this._socketGeneration;
+      const isCurrent = () => this._websocket === socket && this._socketGeneration === generation;
+      const cleanup = () => {
+        if (timeoutId !== null) clearTimeout(timeoutId);
+        if (this._cancelActiveConnection === cancel) this._cancelActiveConnection = null;
+        if (this._failActiveConnection === fail) this._failActiveConnection = null;
+      };
+      const detachCurrent = () => {
+        if (isCurrent()) this._websocket = null;
+      };
+      const succeed = value => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        detachCurrent();
+        fulfill(value);
+      };
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (isCurrent()) this._markNotReady();
+        detachCurrent();
+        const connectionError = error instanceof Error ? error : new Error("Websocket connection failed");
+        connectionError.wasOpen = opened;
+        reject(connectionError);
+      };
+      const cancel = () => {
+        if (settled) return;
+        const current = isCurrent();
+        succeed(false);
+        if (current) this._abortWebsocket(socket);
+      };
+
+      this._cancelActiveConnection = cancel;
+      this._failActiveConnection = fail;
+
+      try {
+        const previous = this._websocket;
+        socket = this._createWebSocket();
+        this._websocket = socket;
+        this._abortWebsocket(previous);
+        socket.binaryType = "arraybuffer";
+
+        timeoutId = setTimeout(() => {
+          if (!isCurrent() || opened) return;
+          const error = new Error(`Websocket connect timed out after ${this._connectTimeoutMs}ms`);
+          fail(error);
+          this._abortWebsocket(socket);
+        }, this._connectTimeoutMs);
+
+        const onOpen = () => {
+          if (!isCurrent() || settled) return;
+          if (this._stopped) {
+            cancel();
+            return;
+          }
+
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          try {
+            for (const [channel, tradesOnly] of this._channels) {
+              console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly);
+              socket.send(this._makeJoinMessage(tradesOnly, channel));
+            }
+          }
+          catch (error) {
+            fail(error);
+            this._abortWebsocket(socket);
+            return;
+          }
+
+          opened = true;
+          this._lastReset = Date.now();
+          this._attemptingReconnect = false;
+          this._markReady();
+          console.log("Intrinio Realtime Client - Websocket connected%s", this._config.isPublicKey ? " (public key)" : "");
+          this._logStartupOnce();
+        };
+        const onClose = closeEventOrCode => {
+          if (!isCurrent() || settled) return;
+          const code = typeof closeEventOrCode === "number" ? closeEventOrCode : closeEventOrCode && closeEventOrCode.code;
+          console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code);
+          this._markNotReady();
+          if (this._stopped) succeed(false);
+          else fail(new Error(`Websocket closed${code === undefined ? "" : ` with code ${code}`}`));
+        };
+        const onError = error => {
+          if (!isCurrent() || settled) return;
+          console.error("Intrinio Realtime Client - Websocket error: %s", error && error.message ? error.message : error);
+          fail(error);
+          this._abortWebsocket(socket);
+        };
+        const onMessage = (message, isBinary) => {
+          if (!isCurrent() || settled || !opened || this._stopped) return;
+          const data = message && typeof message === "object" && "data" in message ? message.data : message;
+          this._handleIncomingMessage(data, isBinary, socket, generation);
+        };
+
+        if (this._config.isPublicKey) {
+          socket.onopen = onOpen;
+          socket.onclose = onClose;
+          socket.onerror = onError;
+          socket.onmessage = onMessage;
+        }
+        else {
+          socket.on("open", onOpen);
+          socket.on("close", onClose);
+          socket.on("error", onError);
+          socket.on("message", onMessage);
+        }
+      }
+      catch (error) {
+        fail(error);
+        this._abortWebsocket(socket);
+      }
+    });
+  }
+
+  _handleIncomingMessage(data, isBinary, socket, generation) {
+    const isCurrent = () => this._websocket === socket && this._socketGeneration === generation && !this._stopped;
+    if (typeof data === "string" || isBinary === false) {
+      console.log("Intrinio Realtime Client - Message: %s", data);
+      return;
+    }
+    if (typeof Blob !== "undefined" && data instanceof Blob) {
+      data.arrayBuffer().then(buffer => {
+        if (isCurrent()) {
+          this._msgCount++;
+          this._parseSocketMessage(buffer);
+        }
+      }).catch(error => console.error("Intrinio Realtime Client - Error reading websocket message:", error));
+      return;
+    }
+    if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+      this._msgCount++;
+      this._parseSocketMessage(data);
+    }
+    else {
+      console.log("Intrinio Realtime Client - Message: %s", data);
+    }
+  }
+
+  _abortWebsocket(socket) {
+    if (!socket) return;
+    try {
+      if (typeof socket.terminate === "function") socket.terminate();
+      else if (typeof socket.close === "function") socket.close();
+    }
+    catch (_) {}
+  }
+
+  _markReady() {
+    this._isReady = true;
+    for (const waiter of this._readyWaiters) waiter();
+    this._readyWaiters.clear();
+  }
+
+  _markNotReady() {
+    this._isReady = false;
+  }
+
+  _waitUntilReady() {
+    if (this._isReady || this._stopped) return Promise.resolve();
+    return new Promise(resolve => this._readyWaiters.add(resolve));
+  }
+
+  _handleSocketFailure(error) {
+    const socket = this._websocket;
+    this._markNotReady();
+    if (this._failActiveConnection) this._failActiveConnection(error);
+    this._abortWebsocket(socket);
   }
 
   _logStartupOnce() {
-    if (this._startupLogged)
-      return;
+    if (this._startupLogged) return;
     this._startupLogged = true;
     console.log("Intrinio Realtime Client - Startup succeeded");
-    if (!this._config.isPublicKey) {
-      process.on('SIGINT', () => {
+    if (!this._config.isPublicKey && typeof process !== "undefined" && process && typeof process.on === "function") {
+      this._sigintHandler = () => {
         console.log("Intrinio Realtime Client - Shutdown detected");
-        this.stop();
-        process.kill(process.pid, 'SIGTERM');
-      });
+        this.stop().finally(() => process.kill(process.pid, 'SIGTERM'));
+      };
+      process.on('SIGINT', this._sigintHandler);
     }
-  }
-
-  _resetWebsocket() {
-    const previous = this._websocket;
-    this._websocket = null;
-    this._abortWebsocket(previous);
-    if (this._config.isPublicKey)
-      return new Promise((fulfill, reject) => {
-        let settled = false;
-        const succeed = () => {
-          if (settled) return;
-          settled = true;
-          fulfill(true);
-        };
-        const fail = (error) => {
-          if (settled) return;
-          settled = true;
-          reject(error || new Error("Websocket closed"));
-        };
-        try {
-          console.info("Intrinio Realtime Client - Websocket initializing (public key)");
-          let wsUrl = this._getWebSocketUrl();
-          this._websocket = new WebSocket(wsUrl);
-          this._websocket.binaryType = "arraybuffer";
-          const timeoutId = setTimeout(() => {
-            console.error("Intrinio Realtime Client - Websocket connect timed out after %ims", CONNECT_TIMEOUT_MS);
-            this._abortWebsocket(this._websocket);
-            fail(new Error("Websocket connect timed out"));
-          }, CONNECT_TIMEOUT_MS);
-          this._websocket.onopen = () => {
-            clearTimeout(timeoutId);
-            console.log("Intrinio Realtime Client - Websocket connected (public key)");
-            if (this._channels.size > 0) {
-              for (const [channel, tradesOnly] of this._channels) {
-                let message = this._makeJoinMessage(tradesOnly, channel);
-                console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly);
-                this._websocket.send(message);
-              }
-            }
-            this._lastReset = Date.now();
-            this._isReady = true;
-            this._isReconnecting = false;
-            this._attemptingReconnect = false;
-            this._logStartupOnce();
-          };
-          this._websocket.onclose = (code) => {
-            clearTimeout(timeoutId);
-            this._isReady = false;
-            console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code);
-            if (this._stopped)
-              succeed();
-            else
-              fail();
-          }
-          this._websocket.onerror = (error) => {
-            console.error("Intrinio Realtime Client - Websocket error: %s", error);
-            this._abortWebsocket(this._websocket);
-          }
-          this._websocket.onmessage = (message) => {
-            this._msgCount++;
-            if (message.data instanceof ArrayBuffer)
-              this._parseSocketMessage(message.data);
-            else
-              console.log("Intrinio Realtime Client - Message: %s", message.data);
-          };
-        }
-        catch (error) {
-          console.error("Intrinio Realtime Client - Error establishing public key websocket connection (%s)", error);
-          fail(error);
-        }
-      });
-    else
-      return new Promise((fulfill, reject) => {
-        let settled = false;
-        const succeed = () => {
-          if (settled) return;
-          settled = true;
-          fulfill(true);
-        };
-        const fail = (error) => {
-          if (settled) return;
-          settled = true;
-          reject(error || new Error("Websocket closed"));
-        };
-        try {
-          console.info("Intrinio Realtime Client - Websocket initializing");
-          const WebSocket = require('ws');
-          let wsUrl = this._getWebSocketUrl();
-          this._websocket = new WebSocket(wsUrl, {
-            perMessageDeflate: false,
-            handshakeTimeout: CONNECT_TIMEOUT_MS
-          }, {headers: {
-              [CLIENT_INFO_HEADER_KEY]: CLIENT_INFO_HEADER_VALUE,
-              [MESSAGE_VERSION_HEADER_KEY]: MESSAGE_VERSION_HEADER_VALUE
-            }});
-          this._websocket.binaryType = "arraybuffer";
-          this._websocket.on("open", () => {
-            console.log("Intrinio Realtime Client - Websocket connected");
-            if (this._channels.size > 0) {
-              for (const [channel, tradesOnly] of this._channels) {
-                let message = this._makeJoinMessage(tradesOnly, channel);
-                console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", channel, tradesOnly);
-                this._websocket.send(message);
-              }
-            }
-            this._lastReset = Date.now();
-            this._isReady = true;
-            this._isReconnecting = false;
-            this._attemptingReconnect = false;
-            this._logStartupOnce();
-          });
-          this._websocket.on("close", (code, reason) => {
-            this._isReady = false;
-            console.info("Intrinio Realtime Client - Websocket closed (code: %o)", code);
-            if (this._stopped)
-              succeed();
-            else
-              fail();
-          });
-          this._websocket.on("error", (error) => {
-            console.error("Intrinio Realtime Client - Websocket error: %s", error);
-            this._abortWebsocket(this._websocket);
-          });
-          this._websocket.on("message", (message) => {
-            this._msgCount++;
-            this._parseSocketMessage(message);
-          });
-        }
-        catch (error) {
-          console.error("Intrinio Realtime Client - Error establishing websocket connection (%s)", error);
-          fail(error);
-        }
-      });
   }
 
   _join(symbol, tradesOnly) {
@@ -829,38 +1053,51 @@ class IntrinioRealtime {
     }
     if (!this._channels.has(symbol)) {
       this._channels.set(symbol, tradesOnly);
-      let message = this._makeJoinMessage(tradesOnly, symbol);
-      console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", symbol, tradesOnly);
-      this._websocket.send(message);
+      if (!this._isReady || !this._websocket) return false;
+      try {
+        let message = this._makeJoinMessage(tradesOnly, symbol);
+        console.info("Intrinio Realtime Client - Joining channel: %s (trades only = %s)", symbol, tradesOnly);
+        this._websocket.send(message);
+      }
+      catch (error) {
+        this._handleSocketFailure(error);
+        return false;
+      }
     }
+    return true;
   }
 
   _leave(symbol) {
     if (this._channels.has(symbol)) {
       this._channels.delete(symbol);
-      let message = this._makeLeaveMessage(symbol);
-      console.info("Intrinio Realtime Client - Leaving channel: %s", symbol);
-      this._websocket.send(message);
+      if (this._isReady && this._websocket) {
+        try {
+          let message = this._makeLeaveMessage(symbol);
+          console.info("Intrinio Realtime Client - Leaving channel: %s", symbol);
+          this._websocket.send(message);
+        }
+        catch (error) {
+          this._handleSocketFailure(error);
+        }
+      }
     }
   }
 
   async join(symbols, tradesOnly) {
-    while (!this._isReady) {
-      if (this._stopped)
-        return;
-      await sleep(1000);
-    }
+    await this._waitUntilReady();
+    if (this._stopped) return;
     let _tradesOnly = (this._config.tradesOnly ? this._config.tradesOnly : false) || (tradesOnly ? tradesOnly : false);
+    let sent = true;
     if (symbols instanceof Array) {
       for (const symbol of symbols) {
         if (!this._channels.has(symbol)){
-          this._join(symbol, _tradesOnly);
+          sent = this._join(symbol, _tradesOnly) && sent;
         }
       }
     }
     else if (typeof symbols === "string") {
       if (!this._channels.has(symbols)){
-        this._join(symbols, _tradesOnly);
+        sent = this._join(symbols, _tradesOnly);
       }
     }
     else if ((typeof tradesOnly !== "undefined") || (typeof tradesOnly !== "boolean")) {
@@ -869,6 +1106,7 @@ class IntrinioRealtime {
     else {
       console.error("Intrinio Realtime Client - Invalid use of 'join'");
     }
+    if (!sent && !this._stopped) await this._waitUntilReady();
   }
 
   leave(symbols) {
@@ -897,23 +1135,63 @@ class IntrinioRealtime {
   }
 
   async stop() {
+    if (this._stopPromise) return this._stopPromise;
+    this._stopPromise = this._stopCore();
+    return this._stopPromise;
+  }
+
+  async _stopCore() {
+    const socket = this._websocket;
+    const wasReady = this._isReady;
     this._stopped = true;
-    this._isReady = false;
+    this._markNotReady();
+    for (const waiter of this._readyWaiters) waiter();
+    this._readyWaiters.clear();
+    this._clearEventQueues();
+
     console.log("Intrinio Realtime Client - Leaving subscribed channels");
-    for (const channel of this._channels.keys()) {
-      this._leave(channel);
-    }
-    while (this._websocket && this._websocket.bufferedAmount > 0) {
-      await sleep(500);
-    }
-    console.log("Intrinio Realtime Client - Websocket closing");
-    if (this._websocket) {
-      try {
-        this._websocket.close(1000, "Terminated by client");
+    if (wasReady && socket) {
+      for (const channel of this._channels.keys()) {
+        try { socket.send(this._makeLeaveMessage(channel)); }
+        catch (_) { break; }
       }
-      catch (e) {}
-      this._abortWebsocket(this._websocket);
     }
+    this._channels.clear();
+
+    if (this._cancelBackoff) this._cancelBackoff();
+    const authRequest = this._authRequest;
+    if (this._cancelAuth) this._cancelAuth();
+    if (authRequest) {
+      try {
+        if (typeof authRequest.abort === "function") authRequest.abort();
+        else if (typeof authRequest.destroy === "function") authRequest.destroy(new Error("Client stopped"));
+      }
+      catch (_) {}
+      this._authRequest = null;
+    }
+
+    if (this._sigintHandler && typeof process !== "undefined" && process && typeof process.removeListener === "function") {
+      process.removeListener('SIGINT', this._sigintHandler);
+      this._sigintHandler = null;
+    }
+
+    const deadline = Date.now() + STOP_DRAIN_TIMEOUT_MS;
+    while (wasReady && socket && socket.bufferedAmount > 0 && Date.now() < deadline)
+      await sleep(50);
+
+    console.log("Intrinio Realtime Client - Websocket closing");
+    if (socket) {
+      try { socket.close(1000, "Terminated by client"); }
+      catch (_) {}
+    }
+
+    if (!wasReady && this._cancelActiveConnection) this._cancelActiveConnection();
+    if (this._connectionLoopPromise) {
+      await Promise.race([this._connectionLoopPromise, sleep(Math.max(0, Math.min(1000, deadline - Date.now())))]);
+    }
+    if (this._cancelActiveConnection) this._cancelActiveConnection();
+    this._abortWebsocket(socket);
+    if (this._connectionLoopPromise) await this._connectionLoopPromise;
   }
 
   getTotalMsgCount() {
@@ -931,7 +1209,7 @@ class Tick{
 class IntrinioRealtimeReplayClient {
   constructor(accessKey, onTrade, onQuote, config = {}) {
     this._accessKey = accessKey;
-    this._config = Object.assign(defaultReplayConfig, config);
+    this._config = Object.assign({}, defaultReplayConfig, config);
     this._msgCount = 0;
     this._channels = new Map();
     this._onTrade = (onTrade && (typeof onTrade === "function")) ? onTrade : (_) => {};
