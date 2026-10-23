@@ -76,6 +76,7 @@ setInterval(() => {
     let totalMsgCount = client.getTotalMsgCount();
     if (totalMsgCount > 0) {
         console.log("Total updates received = %i", totalMsgCount);
+        console.log("Quotes dropped = %i", client.getDroppedQuoteCount());
     }
     else {
         console.log("No updates");

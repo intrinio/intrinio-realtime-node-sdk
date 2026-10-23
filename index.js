@@ -8,7 +8,11 @@ const SELF_HEAL_BACKOFFS = [10000, 30000, 60000, 300000, 600000];
 const CONNECT_TIMEOUT_MS = 30000;
 const TOKEN_MAX_AGE_MS = 23 * 60 * 60 * 1000;
 const PROCESSING_BATCH_SIZE = 1000;
+const QUOTE_QUEUE_CAP = 500000;
 const STOP_DRAIN_TIMEOUT_MS = 5000;
+const CLOSE_ACK_TIMEOUT_MS = 1000;
+const STABLE_SESSION_MS = 1000;
+const SOCKET_CLOSED = 3;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -38,7 +42,9 @@ class EventQueue {
     if (this._head >= this._items.length)
       return undefined;
 
-    const item = this._items[this._head++];
+    const index = this._head++;
+    const item = this._items[index];
+    this._items[index] = undefined;
     if (this._head >= 1024 && this._head * 2 >= this._items.length) {
       this._items = this._items.slice(this._head);
       this._head = 0;
@@ -344,9 +350,15 @@ class IntrinioRealtime {
     this._backingByteArray = new Uint8Array(this._float32Array.buffer);
     this._tradeQueue = new EventQueue();
     this._quoteQueue = new EventQueue();
+    this._quoteQueueCap = QUOTE_QUEUE_CAP;
+    this._droppedQuoteCount = 0;
     this._queueDrainScheduled = false;
     this._selfHealBackoffs = SELF_HEAL_BACKOFFS;
     this._connectTimeoutMs = CONNECT_TIMEOUT_MS;
+    this._closeAckTimeoutMs = CLOSE_ACK_TIMEOUT_MS;
+    this._stableSessionMs = STABLE_SESSION_MS;
+    this._stableSessionTimer = null;
+    this._noteStableSession = null;
 
     if ((!this._accessKey) || (this._accessKey === "")) {
       throw "Intrinio Realtime Client - Access Key is required";
@@ -520,11 +532,23 @@ class IntrinioRealtime {
     }
   }
 
+  _messageIsComplete(bytes, msgType) {
+    if (bytes.length < 3) return false;
+    const symbolLength = bytes[2];
+    const conditionIndex = (msgType === 0 ? 26 : 22) + symbolLength;
+    if (conditionIndex >= bytes.length) return false;
+    return bytes.length >= conditionIndex + 1 + bytes[conditionIndex];
+  }
+
   _parseSocketMessage(data) {
     let bytes = new Uint8Array(data);
     let msgCount = bytes[0];
     let startIndex = 1;
     for (let i = 0; i < msgCount; i++) {
+      if (startIndex + 1 >= bytes.length) {
+        console.warn("Intrinio Realtime Client - Invalid message length: %i", bytes[startIndex + 1]);
+        break;
+      }
       let msgType = bytes[startIndex];
       let msgLength = bytes[startIndex + 1];
       let endIndex = startIndex + msgLength;
@@ -533,15 +557,26 @@ class IntrinioRealtime {
         break;
       }
       let chunk = bytes.slice(startIndex, endIndex);
-      switch(msgType) {
-        case 0:
-          this._tradeQueue.enqueue(this._parseTrade(chunk));
-          break;
-        case 1:
-        case 2:
-          this._quoteQueue.enqueue(this._parseQuote(chunk));
-          break;
-        default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType);
+      if ((msgType === 0 || msgType === 1 || msgType === 2) && !this._messageIsComplete(chunk, msgType)) {
+        console.warn("Intrinio Realtime Client - Invalid message length: %i", msgLength);
+        startIndex = endIndex;
+        continue;
+      }
+      try {
+        switch(msgType) {
+          case 0:
+            this._tradeQueue.enqueue(this._parseTrade(chunk));
+            break;
+          case 1:
+          case 2:
+            if (this._quoteQueue.length >= this._quoteQueueCap) this._droppedQuoteCount++;
+            else this._quoteQueue.enqueue(this._parseQuote(chunk));
+            break;
+          default: console.warn("Intrinio Realtime Client - Invalid message type: %i", msgType);
+        }
+      }
+      catch (error) {
+        console.error("Intrinio Realtime Client - Error parsing websocket message:", error);
       }
       startIndex = endIndex;
     }
@@ -793,27 +828,64 @@ class IntrinioRealtime {
 
   async _runConnectionLoop() {
     let backoffIndex = 0;
-    while (!this._stopped) {
-      try {
-        await this._ensureToken();
-        if (this._stopped) return;
-        await this._connectOnce();
-        if (this._stopped) return;
-      }
-      catch (error) {
-        if (this._stopped) return;
-        if (error && error.wasOpen) backoffIndex = 0;
-        this._markNotReady();
-        this._attemptingReconnect = true;
-        console.info("Intrinio Realtime Client - Websocket reconnecting...");
-        console.warn("Intrinio Realtime Client - Connection attempt failed: %s", error && error.message ? error.message : error);
-      }
+    let gaveImmediateRetry = false;
+    this._noteStableSession = () => {
+      gaveImmediateRetry = false;
+      backoffIndex = 0;
+    };
+    try {
+      while (!this._stopped) {
+        try {
+          await this._ensureToken();
+          if (this._stopped) return;
+          await this._connectOnce();
+          if (this._stopped) return;
+        }
+        catch (error) {
+          if (this._stopped) return;
+          const wasOpen = !!(error && error.wasOpen);
+          this._markNotReady();
+          this._attemptingReconnect = true;
+          console.info("Intrinio Realtime Client - Websocket reconnecting...");
+          if (wasOpen)
+            console.info("Intrinio Realtime Client - Websocket closed: %s", error && error.message ? error.message : error);
+          else
+            console.warn("Intrinio Realtime Client - Connection attempt failed: %s", error && error.message ? error.message : error);
 
-      const backoff = this._selfHealBackoffs[Math.min(backoffIndex, this._selfHealBackoffs.length - 1)];
-      console.log("Intrinio Realtime Client - Sleeping for %isec", backoff / 1000);
-      if (!(await this._sleepForReconnect(backoff))) return;
-      backoffIndex = Math.min(backoffIndex + 1, this._selfHealBackoffs.length - 1);
+          if (wasOpen && !gaveImmediateRetry) {
+            gaveImmediateRetry = true;
+            backoffIndex = 0;
+            if (!(await this._sleepForReconnect(0))) return;
+            continue;
+          }
+
+          const backoff = this._selfHealBackoffs[Math.min(backoffIndex, this._selfHealBackoffs.length - 1)];
+          console.log("Intrinio Realtime Client - Sleeping for %isec", backoff / 1000);
+          if (!(await this._sleepForReconnect(backoff))) return;
+          backoffIndex = Math.min(backoffIndex + 1, this._selfHealBackoffs.length - 1);
+        }
+      }
     }
+    finally {
+      this._noteStableSession = null;
+      this._clearStableSessionTimer();
+    }
+  }
+
+  _scheduleStableSession() {
+    this._clearStableSessionTimer();
+    this._stableSessionTimer = setTimeout(() => {
+      this._stableSessionTimer = null;
+      if (this._stopped) return;
+      if (typeof this._noteStableSession === "function") this._noteStableSession();
+    }, this._stableSessionMs);
+    if (typeof this._stableSessionTimer.unref === "function") this._stableSessionTimer.unref();
+  }
+
+  _clearStableSessionTimer() {
+    if (!this._stableSessionTimer) return;
+    clearTimeout(this._stableSessionTimer);
+    this._stableSessionTimer = null;
   }
 
   _sleepForReconnect(milliseconds) {
@@ -862,6 +934,7 @@ class IntrinioRealtime {
       const isCurrent = () => this._websocket === socket && this._socketGeneration === generation;
       const cleanup = () => {
         if (timeoutId !== null) clearTimeout(timeoutId);
+        this._clearStableSessionTimer();
         if (this._cancelActiveConnection === cancel) this._cancelActiveConnection = null;
         if (this._failActiveConnection === fail) this._failActiveConnection = null;
       };
@@ -933,6 +1006,7 @@ class IntrinioRealtime {
           }
 
           opened = true;
+          this._scheduleStableSession();
           this._lastReset = Date.now();
           this._attemptingReconnect = false;
           this._markReady();
@@ -1003,8 +1077,36 @@ class IntrinioRealtime {
     }
   }
 
+  _isSocketClosed(socket) {
+    return !socket || socket.readyState === SOCKET_CLOSED;
+  }
+
+  _waitForSocketClose(socket, timeoutMs) {
+    if (this._isSocketClosed(socket)) return Promise.resolve(true);
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = closed => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (typeof socket.removeListener === "function") socket.removeListener("close", onClose);
+        resolve(closed);
+      };
+      const onClose = () => finish(true);
+      const timer = setTimeout(() => finish(this._isSocketClosed(socket)), timeoutMs);
+      if (typeof socket.on === "function") socket.on("close", onClose);
+      else {
+        const previous = socket.onclose;
+        socket.onclose = event => {
+          if (typeof previous === "function") previous(event);
+          onClose();
+        };
+      }
+    });
+  }
+
   _abortWebsocket(socket) {
-    if (!socket) return;
+    if (!socket || this._isSocketClosed(socket)) return;
     try {
       if (typeof socket.terminate === "function") socket.terminate();
       else if (typeof socket.close === "function") socket.close();
@@ -1148,6 +1250,7 @@ class IntrinioRealtime {
     for (const waiter of this._readyWaiters) waiter();
     this._readyWaiters.clear();
     this._clearEventQueues();
+    this._clearStableSessionTimer();
 
     console.log("Intrinio Realtime Client - Leaving subscribed channels");
     if (wasReady && socket) {
@@ -1180,22 +1283,37 @@ class IntrinioRealtime {
       await sleep(50);
 
     console.log("Intrinio Realtime Client - Websocket closing");
-    if (socket) {
+    if (wasReady && socket && !this._isSocketClosed(socket)) {
+      const pendingClose = this._waitForSocketClose(socket, this._closeAckTimeoutMs);
       try { socket.close(1000, "Terminated by client"); }
       catch (_) {}
+      const acknowledged = (await pendingClose) || this._isSocketClosed(socket);
+      if (!acknowledged) {
+        if (this._cancelActiveConnection) this._cancelActiveConnection();
+        else this._abortWebsocket(socket);
+      }
+    }
+    else if (!wasReady) {
+      if (socket && !this._isSocketClosed(socket)) {
+        try { socket.close(1000, "Terminated by client"); }
+        catch (_) {}
+      }
+      if (this._cancelActiveConnection) this._cancelActiveConnection();
+      this._abortWebsocket(socket);
+    }
+    else if (socket && this._isSocketClosed(socket) && this._cancelActiveConnection) {
+      this._cancelActiveConnection();
     }
 
-    if (!wasReady && this._cancelActiveConnection) this._cancelActiveConnection();
-    if (this._connectionLoopPromise) {
-      await Promise.race([this._connectionLoopPromise, sleep(Math.max(0, Math.min(1000, deadline - Date.now())))]);
-    }
-    if (this._cancelActiveConnection) this._cancelActiveConnection();
-    this._abortWebsocket(socket);
     if (this._connectionLoopPromise) await this._connectionLoopPromise;
   }
 
   getTotalMsgCount() {
     return this._msgCount;
+  }
+
+  getDroppedQuoteCount() {
+    return this._droppedQuoteCount;
   }
 }
 
